@@ -174,3 +174,29 @@ from `eval/`; a second suite is a new adapter under `eval/corpora/`.
   even when handed it alone. This is upstream of everything here.
 - **Multi-metric judgments** (e.g. "is this capital-intensive?") need several
   metrics and a policy each; only the single-metric path is built.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
+
+## Acknowledgement
+
+PRISM is evaluated against [FinanceBench](https://github.com/patronus-ai/financebench),
+an open-source benchmark for financial question answering. The corpus is not
+redistributed here — `financebench/` is gitignored and cloned separately. We use
+their PDFs and question/answer/evidence triples as input, and deliberately do
+*not* use their document metadata: PRISM builds its own catalog and is scored
+against theirs.
+
+Citation: If you use our open-source dataset or refer to our result, please use the following citation:
+
+```bibtex
+@misc{islam2023financebench,
+      title={FinanceBench: A New Benchmark for Financial Question Answering},
+      author={Pranab Islam and Anand Kannappan and Douwe Kiela and Rebecca Qian and Nino Scherrer and Bertie Vidgen},
+      year={2023},
+      eprint={2311.11944},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
