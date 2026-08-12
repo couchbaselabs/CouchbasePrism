@@ -188,7 +188,6 @@ their PDFs and question/answer/evidence triples as input, and deliberately do
 *not* use their document metadata: PRISM builds its own catalog and is scored
 against theirs.
 
-Citation: If you use our open-source dataset or refer to our result, please use the following citation:
 
 ```bibtex
 @misc{islam2023financebench,
