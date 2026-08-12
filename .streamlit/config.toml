@@ -1,0 +1,34 @@
+[theme]
+base = "light"
+primaryColor = "#0B6B69"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F7F7"
+textColor = "#172B2D"
+linkColor = "#0B6B69"
+codeTextColor = "#173B3D"
+codeBackgroundColor = "#EAF2F2"
+borderColor = "#D7E3E3"
+greenColor = "#16865C"
+redColor = "#C53B42"
+orangeColor = "#B66A15"
+blueColor = "#2D6CDF"
+chartCategoricalColors = ["#0B6B69", "#2D6CDF", "#8A5CC2", "#16865C", "#C53B42", "#B66A15"]
+dataframeBorderColor = "#D7E3E3"
+dataframeHeaderBackgroundColor = "#EAF2F2"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+baseFontSize = 13
+codeFontSize = "0.78rem"
+headingFontSizes = ["28px", "21px", "17px", "14px", "13px", "12px"]
+headingFontWeights = [650, 650, 600, 600, 600, 600]
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.sidebar]
+backgroundColor = "#F3F7F7"
+secondaryBackgroundColor = "#E7F0F0"
+borderColor = "#D7E3E3"
+primaryColor = "#0B6B69"
