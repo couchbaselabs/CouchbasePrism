@@ -71,8 +71,13 @@ git clone https://github.com/patronus-ai/financebench   # the test corpus
 # build the catalog for a corpus (one document per PDF)
 python manage.py build-catalog --corpus financebench --company 3M
 
-# run the benchmark
+# run the benchmark (phase 5 = the full runtime, the default)
 python -m eval.run_benchmark --company 3M --out out/cold.json
+
+# reproduce the whole progression — each phase isolates one capability
+for p in 1-vector 2-catalog 3-hybrid 4-planner 5-runtime; do
+  python -m eval.run_benchmark --company 3M --phase $p --out out/$p.json
+done
 
 # inspect one question, every stage
 python -m eval.debug_question financebench_id_00807
@@ -119,15 +124,42 @@ assume.
 ## Layout
 
 ```
-prism/           the system, corpus-agnostic
-  catalog.py     tier 1 — cover-page extraction, build, resolution
-  retrieval.py   tier 2 — evidence planner, content anchors, search
-  dictionary.py  tier 3 — entries, safe evaluator, policies, approval
-  runtime.py     bind → calculate → validate → answer  (one entry point)
-eval/            benchmark harness; corpora/ holds swappable adapters
-app/             Streamlit demo — calls the same runtime the benchmark does
-design/ docs/    architecture and ADRs
+prism/                    the system, corpus-agnostic
+  catalog/                tier 1 — which document is this?
+    extraction.py         cover page → catalog document
+    repository.py         persistence
+    resolver.py           question → doc_name
+  retrieval/              tier 2 — what does it say, here?
+    planner.py            question → concept, facts, content anchors
+    anchor_search.py      printed row labels → the right chunk (IDF-ranked)
+    vector_search.py      dense kNN
+    hybrid_search.py      BM25 + kNN via the Search Vector Index
+    combined_search.py    assemble and dedupe
+  dictionary/             tier 3 — how is this defined, and who says so?
+    evaluator.py          restricted AST evaluation
+    repository.py         YAML persistence
+    matching.py           concept → approved entry
+    policy.py             value + policy → verdict
+    approval.py           the human decision
+  runtime/
+    fact_binding.py       text → facts with entity/period/column/provenance
+    calculation.py        governed value, or labeled candidates
+    validation.py         is a conclusion authorised?
+    answer.py             prose around numbers already computed
+    pipeline.py           answer_question() — the single entry point
+eval/
+  phases/                 the five phases, as CONFIGURATIONS of one runtime
+  corpora/                swappable corpus adapters
+  run_benchmark.py        run and score
+  debug_question.py       one question, every stage
+app/                      Streamlit demo — calls the same runtime
+design/ docs/             architecture and ADRs
 ```
+
+The phases are `PipelineOptions`, not separate implementations. The previous
+iteration kept five forked eval scripts and they drifted — a prompt fix applied
+to one silently failed to reach the others and cost a question that had been
+passing.
 
 FinanceBench is one test corpus, not the system. Nothing in `prism/` imports
 from `eval/`; a second suite is a new adapter under `eval/corpora/`.

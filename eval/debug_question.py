@@ -14,7 +14,7 @@ Most failures are visible in the plan or the bindings, not the final answer.
 import argparse
 import sys
 
-from eval import judge
+from eval import judge, phases
 from eval.corpora import load as load_corpus
 from prism import catalog, dictionary, runtime
 
@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--corpus", default="financebench")
     ap.add_argument("--chunks", action="store_true",
                     help="print full untruncated chunk text")
+    ap.add_argument("--phase", default=phases.DEFAULT_PHASE,
+                    choices=sorted(phases.PHASES))
     ap.add_argument("--model", default=None)
     args = ap.parse_args()
 
@@ -47,7 +49,8 @@ def main():
     print(f"expected document: {question['doc_name']}")
 
     result = runtime.answer_question(question["question"], catalog_docs,
-                                     dictionary_data, model=args.model)
+                                     dictionary_data, options=phases.get(args.phase),
+                                     model=args.model)
 
     rule("CATALOG — document resolution")
     ok = result["resolved_doc"] == question["doc_name"]

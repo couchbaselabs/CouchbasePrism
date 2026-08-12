@@ -13,7 +13,7 @@ import pathlib
 import sys
 import time
 
-from eval import judge
+from eval import judge, phases
 from eval.corpora import load as load_corpus
 from prism import catalog, dictionary, runtime
 
@@ -23,6 +23,9 @@ def main():
     ap.add_argument("--corpus", default="financebench")
     ap.add_argument("--company", default=None, help="restrict to one company")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--phase", default=phases.DEFAULT_PHASE,
+                    choices=sorted(phases.PHASES),
+                    help="which capabilities are active; see eval/phases")
     ap.add_argument("--model", default=None)
     ap.add_argument("--out", default="out/benchmark.json")
     args = ap.parse_args()
@@ -33,7 +36,8 @@ def main():
     dictionary_data = dictionary.load()
     approved = sum(1 for e in dictionary_data.get("entries", [])
                    if e.get("governance", {}).get("status") == "approved")
-    print(f"corpus={corpus.NAME} questions={len(questions)} "
+    options = phases.get(args.phase)
+    print(f"corpus={corpus.NAME} phase={args.phase} questions={len(questions)} "
           f"catalog={len(catalog_docs)} approved_entries={approved}", file=sys.stderr)
 
     results = []
@@ -42,7 +46,8 @@ def main():
         t0 = time.perf_counter()
         try:
             result = runtime.answer_question(q["question"], catalog_docs,
-                                             dictionary_data, model=args.model)
+                                             dictionary_data, options=options,
+                                             model=args.model)
             verdict = judge.score(q["question"], q["expected_answer"],
                                   result["answer"], model=args.model)
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
@@ -50,6 +55,7 @@ def main():
                                  for c in result["calculation"]["computed"])
             results.append({
                 "id": q["id"],
+                "phase": args.phase,
                 "expected_doc": q["doc_name"],
                 "resolved_doc": result["resolved_doc"],
                 "resolution_correct": result["resolved_doc"] == q["doc_name"],
@@ -86,7 +92,7 @@ def main():
     passed = sum(1 for r in scored if r["passed"])
     resolved = sum(1 for r in results if r.get("resolution_correct"))
     pct = 100 * passed / len(scored) if scored else 0
-    print(f"\n=== converged with {corpus.NAME}: {passed}/{len(scored)} ({pct:.0f}%) | "
+    print(f"\n=== [{args.phase}] converged with {corpus.NAME}: {passed}/{len(scored)} ({pct:.0f}%) | "
           f"doc resolution {resolved}/{len(results)} | "
           f"{len(results) - len(scored)} errored", file=sys.stderr)
     print(f"full output: {out_path}", file=sys.stderr)

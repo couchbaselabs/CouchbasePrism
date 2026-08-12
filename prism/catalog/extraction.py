@@ -1,13 +1,8 @@
-"""Tier 1 — the catalog: one document per source PDF (design/architecture.md §2).
+"""Deriving a catalog document from a PDF's cover page.
 
-Answers "which document is this?" so retrieval can be scoped before any
-semantic search happens. Catalog-based document filtering was the single
-highest-leverage change in the whole evaluation (25% -> 38%), ahead of hybrid
-search.
-
-Extraction is a fast cover-page pass, NOT a full layout parse: PyMuPDF pulls
-pages 1-5 in ~100-600ms, versus 24-200s for a full Docling conversion. The
-catalog never needs layout analysis, so it should never pay for it.
+A fast cover-page pass, NOT a full layout parse: PyMuPDF reads pages 1-5 in
+~100-600ms against 24-200s for a full conversion. The catalog never needs
+layout analysis, so it should never pay for it.
 """
 import datetime
 import re
@@ -15,10 +10,10 @@ import time
 
 import pymupdf
 
-from . import config, llm
-from .couchbase_io import query
+from .. import llm
 
 COVER_PAGES = 5
+FIELDS = ["company", "doc_type", "period_end_date"]
 
 CLASSIFY_SYSTEM_PROMPT = (
     "You are extracting three fields from the cover page(s) of an SEC filing, given only "
@@ -41,14 +36,8 @@ CLASSIFY_SYSTEM_PROMPT = (
     'source must be "pdf_text" (literally printed) or "absent". confidence is 0.0-1.0.'
 )
 
-FIELDS = ["company", "doc_type", "period_end_date"]
+_DATE_FORMATS = ["%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%d %B %Y", "%d %b %Y", "%Y-%m-%d"]
 
-_DATE_FORMATS = [
-    "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%d %B %Y", "%d %b %Y", "%Y-%m-%d",
-]
-
-
-# --------------------------------------------------------------- extraction
 
 def cover_text(pdf_path: str, pages: int = COVER_PAGES) -> str:
     """sort=True is load-bearing. PyMuPDF's default order follows the PDF
@@ -70,8 +59,8 @@ def apply_grounding_check(extraction: dict, text: str) -> dict:
     span. A model can cite sloppily while being right about the value (an 8-K
     period read correctly from "Date of Report" but cited against boilerplate),
     and can cite plausibly while being wrong (a ticker recalled from training
-    data for a filing that prints no ticker at all). Only the second is a
-    hallucination; only value-checking distinguishes them."""
+    data for a filing that prints none). Only the second is a hallucination;
+    only value-checking tells them apart."""
     haystack = _normalize_ws(text)
     for name in FIELDS:
         field = extraction.get(name)
@@ -108,8 +97,6 @@ def to_iso_date(date_str: str):
     return None
 
 
-# ------------------------------------------------------------------- build
-
 def build_document(doc_name: str, extraction: dict) -> dict:
     period = extraction.get("period_end_date", {})
     raw = period.get("value")
@@ -129,57 +116,5 @@ def build_document(doc_name: str, extraction: dict) -> dict:
     }
 
 
-def upsert(document: dict) -> None:
-    query(
-        f"UPSERT INTO `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` "
-        f"(KEY, VALUE) VALUES ($doc_id, $doc_body)",
-        {"$doc_id": document["doc_id"], "$doc_body": document},
-    )
-
-
 def build_from_pdf(pdf_path: str, doc_name: str, model: str = None) -> dict:
     return build_document(doc_name, classify_cover(cover_text(pdf_path), model=model))
-
-
-# ----------------------------------------------------------------- resolve
-
-def load_all() -> list:
-    return query(
-        "SELECT d.doc_name, d.doc_type.`value` AS doc_type, d.doc_period, "
-        "d.period_end_date_iso "
-        f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d"
-    )
-
-
-def period_from_question(question: str):
-    quarter = None
-    m = re.search(r"\bQ([1-4])\b", question, re.IGNORECASE)
-    if m:
-        quarter = int(m.group(1))
-    m = (re.search(r"\bFY\s*(\d{4})\b", question, re.IGNORECASE)
-         or re.search(r"\b(20\d{2})\b", question))
-    return (int(m.group(1)) if m else None), quarter
-
-
-def resolve(catalog_docs: list, year, quarter) -> str:
-    """Deterministic. Regex matched LLM accuracy on structured signals during
-    catalog validation, so there is no reason to pay for a model call here."""
-    if not catalog_docs:
-        raise ValueError("catalog is empty - build it before resolving")
-    if year is None:
-        # No period mentioned: the question means "currently", i.e. the most
-        # recent filing on hand.
-        return max(catalog_docs, key=lambda d: d["period_end_date_iso"] or "")["doc_name"]
-    matches = [d for d in catalog_docs if d["doc_period"] == year]
-    if not matches:
-        return max(catalog_docs, key=lambda d: d["period_end_date_iso"] or "")["doc_name"]
-    if quarter is not None:
-        quarterly = [d for d in matches if d["doc_type"] == "10-Q"]
-        if quarterly:
-            return quarterly[0]["doc_name"]
-    annual = [d for d in matches if d["doc_type"] == "10-K"]
-    return (annual[0] if annual else matches[0])["doc_name"]
-
-
-def resolve_for_question(catalog_docs: list, question: str) -> str:
-    return resolve(catalog_docs, *period_from_question(question))
