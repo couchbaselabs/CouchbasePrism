@@ -7,22 +7,35 @@ design/architecture.md §6.
 """
 import json
 import os
+import time
 
 import requests
 
-from . import config
+from . import config, trace
 
 CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 
 def _post(body: dict, timeout: int) -> dict:
-    resp = requests.post(
-        CHAT_URL,
-        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-        json=body, timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    started = time.perf_counter()
+    try:
+        resp = requests.post(
+            CHAT_URL,
+            headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+            json=body, timeout=timeout,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+        trace.add("llm_call", endpoint=CHAT_URL, request=body, response=content,
+                  usage=result.get("usage"),
+                  elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
+        return result
+    except Exception as exc:
+        trace.add("llm_call", endpoint=CHAT_URL, request=body,
+                  error=f"{type(exc).__name__}: {exc}",
+                  elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
+        raise
 
 
 def chat_json(system: str, user: str, model: str = None, timeout: int = 90) -> dict:

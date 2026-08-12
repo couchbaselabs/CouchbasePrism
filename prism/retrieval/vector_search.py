@@ -1,23 +1,38 @@
 """Dense vector retrieval over the Hyperscale Vector Index."""
 import os
+import time
 
 import requests
 
-from .. import config
+from .. import config, trace
 from ..couchbase_io import query
 
 
 def embed(text: str) -> list:
     """Couchbase AI Data Plane, OpenAI-compatible /v1/embeddings. Must be the
     same model the workflow used to embed the chunks."""
-    resp = requests.post(
-        config.EMBED_ENDPOINT.rstrip("/") + "/v1/embeddings",
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {os.environ['API_KEY']}"},
-        json={"model": config.EMBED_MODEL, "input": text}, timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["data"][0]["embedding"]
+    endpoint = config.EMBED_ENDPOINT.rstrip("/") + "/v1/embeddings"
+    body = {"model": config.EMBED_MODEL, "input": text}
+    started = time.perf_counter()
+    try:
+        resp = requests.post(
+            endpoint,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {os.environ['API_KEY']}"},
+            json=body, timeout=30,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        embedding = result["data"][0]["embedding"]
+        trace.add("embedding_call", endpoint=endpoint, request=body,
+                  dimensions=len(embedding), usage=result.get("usage"),
+                  elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
+        return embedding
+    except Exception as exc:
+        trace.add("embedding_call", endpoint=endpoint, request=body,
+                  error=f"{type(exc).__name__}: {exc}",
+                  elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
+        raise
 
 
 def _select(distance_expr: str, where: str) -> str:

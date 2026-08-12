@@ -12,11 +12,12 @@ values, and the validation verdict.
 Most failures are visible in the plan or the bindings, not the final answer.
 """
 import argparse
+import json
 import sys
 
 from eval import judge, phases
 from eval.corpora import load as load_corpus
-from prism import catalog, dictionary, runtime
+from prism import catalog, dictionary, runtime, trace
 
 
 def rule(title: str) -> None:
@@ -39,18 +40,22 @@ def main():
     if question is None:
         sys.exit(f"no question {args.question_id!r} in corpus {corpus.NAME}")
 
-    catalog_docs = catalog.load_all()
-    dictionary_data = dictionary.load()
-
     rule("QUESTION")
     print(f"id       : {question['id']}")
     print(f"question : {question['question']}")
     print(f"expected : {question['expected_answer']}")
     print(f"expected document: {question['doc_name']}")
 
-    result = runtime.answer_question(question["question"], catalog_docs,
-                                     dictionary_data, options=phases.get(args.phase),
-                                     model=args.model)
+    # Capture at the external-boundary level so this is the actual execution,
+    # not a second debug implementation that can drift from the benchmark.
+    with trace.capture() as events:
+        catalog_docs = catalog.load_all()
+        dictionary_data = dictionary.load()
+        result = runtime.answer_question(question["question"], catalog_docs,
+                                         dictionary_data, options=phases.get(args.phase),
+                                         model=args.model)
+        verdict = judge.score(question["question"], question["expected_answer"],
+                              result["answer"], model=args.model)
 
     rule("CATALOG — document resolution")
     ok = result["resolved_doc"] == question["doc_name"]
@@ -109,11 +114,44 @@ def main():
     rule("ANSWER")
     print(result["answer"])
 
-    verdict = judge.score(question["question"], question["expected_answer"],
-                          result["answer"], model=args.model)
     rule("SCORE")
     print(f"passed : {verdict['passed']}  ({verdict['method']})")
     print(f"comment: {verdict['comment']}")
+
+    rule("LOW-LEVEL EXECUTION TRACE — chronological")
+    for index, event in enumerate(events, 1):
+        kind = event.get("type")
+        elapsed = event.get("elapsed_ms")
+        print(f"\n[{index}] {kind}" + (f"  ({elapsed} ms)" if elapsed is not None else ""))
+        if kind == "couchbase_query":
+            print("SQL++:")
+            print(event.get("statement"))
+            print("PARAMETERS:")
+            print(json.dumps(event.get("params"), indent=2, default=str))
+            print(f"RESULT: rows={event.get('row_count')} status={event.get('status')}")
+            if event.get("metrics"):
+                print("METRICS:")
+                print(json.dumps(event["metrics"], indent=2, default=str))
+        elif kind == "llm_call":
+            request = event.get("request") or {}
+            print(f"ENDPOINT: {event.get('endpoint')}")
+            print("REQUEST:")
+            print(json.dumps(request, indent=2, default=str))
+            print("RESPONSE:")
+            print(event.get("response") or event.get("error"))
+            if event.get("usage"):
+                print("USAGE:")
+                print(json.dumps(event["usage"], indent=2, default=str))
+        elif kind == "embedding_call":
+            print(f"ENDPOINT: {event.get('endpoint')}")
+            print("REQUEST:")
+            print(json.dumps(event.get("request"), indent=2, default=str))
+            print(f"RESULT: dimensions={event.get('dimensions')}")
+            if event.get("usage"):
+                print("USAGE:")
+                print(json.dumps(event["usage"], indent=2, default=str))
+        else:
+            print(json.dumps(event, indent=2, default=str))
 
 
 if __name__ == "__main__":

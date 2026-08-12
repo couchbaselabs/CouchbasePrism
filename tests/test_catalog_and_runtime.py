@@ -1,7 +1,7 @@
 """Pure-logic tests for catalog resolution, date derivation, binding
 validation and conclusion agreement. Each case below corresponds to a bug that
 actually occurred during the FinanceBench evaluation."""
-from prism import catalog, runtime
+from prism import catalog, runtime, trace
 
 CATALOG = [
     {"doc_name": "3M_2018_10K", "doc_type": "10-K", "doc_period": 2018,
@@ -110,3 +110,19 @@ def test_candidates_straddling_the_threshold_block_on_review():
     result = runtime.validate_conclusion(
         [{"value": 0.9578}, {"value": 1.441}], POLICY)
     assert result["status"] == "conflicting"
+
+
+# ------------------------------------------------------------------- trace
+
+def test_trace_is_opt_in_and_preserves_event_order():
+    trace.add("outside", ignored=True)
+    with trace.capture() as events:
+        trace.add("first", value=1)
+        trace.add("second", value=2)
+    assert [e["type"] for e in events] == ["first", "second", "trace_summary"]
+
+
+def test_trace_compacts_large_vectors():
+    with trace.capture() as events:
+        trace.add("query", params={"vector": [0.1] * 2048})
+    assert events[0]["params"]["vector"] == "<vector: 2048 dimensions>"
