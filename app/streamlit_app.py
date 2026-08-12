@@ -31,25 +31,58 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Streamlit's wide layout reserves 5rem of horizontal padding either side and
-# 6rem on top, which pushes the widest rows (the results table, the run button)
-# off screen on a laptop display. Measured against the live DOM rather than
-# guessed.
-#
-# The top value must stay in rem, not px: the app header is absolutely
-# positioned and 3.75rem tall, so anything below that overlaps it. 3.5rem looked
-# fine until the root font size turned out to be 13px, at which point the first
-# card sat 3px under the header. 4rem clears it at any root size.
-LAYOUT_CSS = """
+# Streamlit's wide layout is right for the benchmark table and trace, but its
+# default side padding is generous. Keep a narrow responsive gutter while
+# ensuring that long diagnostic content scrolls inside its element instead of
+# widening the browser viewport.
+st.html("""
 <style>
-  .stMainBlockContainer { padding: 4rem 2rem 3rem 2rem; }
-  [data-testid="stSidebarHeader"] { height: 2.75rem; padding-top: 0.35rem;
-                                    padding-bottom: 0; }
-  [data-testid="stSidebarUserContent"] { padding-top: 0; }
-</style>
-"""
-st.markdown(LAYOUT_CSS, unsafe_allow_html=True)
+  /* --- MAIN PANEL --- */
+  [data-testid="stMainBlockContainer"] {
+    max-width: 90% !important;
+    margin-left: 0.5rem !important;
+    margin-right: auto !important;
 
+    /* REDUCE MAIN PANEL TOP SPACING (Adjust 1.5rem as needed) */
+    padding-top: 1.5rem !important;
+
+    padding-left: clamp(0.75rem, 1.4vw, 1.5rem) !important;
+    padding-right: clamp(0.75rem, 1.4vw, 1.5rem) !important;
+  }
+
+  /* --- SIDEBAR --- */
+  /* Reduce space inside the sidebar content area */
+  [data-testid="stSidebarUserContent"] {
+    padding-top: 1rem !important; /* Adjust 1rem as needed */
+  }
+
+  /* Tighten space above the sidebar header/collapse toggle button */
+  [data-testid="stSidebarHeader"] {
+    padding-top: 0.5rem !important;
+    padding-bottom: 0 !important;
+    height: auto !important;
+  }
+
+  /* Prevent horizontal browser scroll */
+  [data-testid="stMain"] {
+    overflow-x: clip !important;
+  }
+  [data-testid="stCode"] pre {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+  }
+
+  /* Elevation is reserved for the three primary surfaces. Trace expanders
+     retain their flat treatment so the page still has a clear hierarchy. */
+  .st-key-prompt-card,
+  .st-key-benchmark-summary,
+  .st-key-answer-card {
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(23, 43, 45, 0.06),
+                0 7px 20px rgba(23, 43, 45, 0.07);
+  }
+</style>
+""")
 MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"]
 PHASE_HELP = {
     "1-vector": "Baseline · pure vector kNN across the corpus (2/8)",
@@ -309,13 +342,24 @@ RESULTS_TABLE_CSS = """
 <style>
 .prism-results { width: 100%; border-collapse: collapse; font-size: 0.86rem;
                  line-height: 1.45; table-layout: fixed; }
+.prism-results-shell { width: 100%; border: 1px solid rgba(128,128,128,0.22);
+                       border-radius: 10px; background: #fff;
+                       box-shadow: 0 1px 2px rgba(23,43,45,0.05),
+                                   0 8px 24px rgba(23,43,45,0.07); }
 .prism-results th { text-align: left; font-weight: 600; padding: 0.6rem 0.7rem;
                     border-bottom: 2px solid rgba(128,128,128,0.35);
-                    vertical-align: bottom; white-space: nowrap; }
+                    vertical-align: bottom; white-space: nowrap; position: sticky;
+                    top: 0; z-index: 1; background: #f3f7f7; }
+.prism-results th:first-child { border-top-left-radius: 9px; }
+.prism-results th:last-child { border-top-right-radius: 9px; }
 .prism-results td { padding: 0.7rem; vertical-align: top;
                     border-bottom: 1px solid rgba(128,128,128,0.18);
                     overflow-wrap: anywhere; }
+.prism-results tbody tr:last-child td { border-bottom: 0; }
+.prism-results tbody tr:last-child td:first-child { border-bottom-left-radius: 9px; }
+.prism-results tbody tr:last-child td:last-child { border-bottom-right-radius: 9px; }
 .prism-results tr:nth-child(even) td { background: rgba(128,128,128,0.05); }
+.prism-results tbody tr:hover td { background: rgba(11,107,105,0.075); }
 /* nowrap matters: the cell sets overflow-wrap:anywhere for long prose, which
    without this breaks the pill itself into "PAS / S". */
 .prism-pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
@@ -357,9 +401,10 @@ def results_table_html(runs: list) -> str:
             f'{run["stats"]["elapsed_ms"] / 1000:.1f}s</div></td>',
         ]
         body.append(f"<tr>{''.join(cells)}</tr>")
-    return (RESULTS_TABLE_CSS +
+    return (RESULTS_TABLE_CSS + '<div class="prism-results-shell">' +
             f'<table class="prism-results"><colgroup>{cols}</colgroup>'
-            f"<thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+            f"<thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table>"
+            "</div>")
 
 
 def convergence_donut(passed: int, failed: int):
@@ -391,19 +436,20 @@ def render_batch(runs: list, company: str, phase: str, model: str):
     total_seconds = sum(r["stats"]["elapsed_ms"] for r in runs) / 1000
     avg_seconds = total_seconds / len(runs) if runs else 0
 
-    chart_col, metric_col = st.columns([1, 2], vertical_alignment="center")
-    with chart_col:
-        st.altair_chart(convergence_donut(passed, failed), width="stretch")
-    with metric_col:
-        top = st.columns(2, border=True)
-        top[0].metric("Convergence", f"{100 * passed / len(runs):.0f}%" if runs else "—",
-                      f"{passed} of {len(runs)} questions", icon=":material/task_alt:")
-        top[1].metric("Diverged", failed, "awaiting review or governance",
-                      delta_color="off", icon=":material/report:")
-        bottom = st.columns(3, border=True)
-        bottom[0].metric("Total tokens", f"{total_tokens:,}", icon=":material/token:")
-        bottom[1].metric("Total time", f"{total_seconds:.1f}s", icon=":material/timer:")
-        bottom[2].metric("Avg latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
+    with st.container(border=True, key="benchmark-summary"):
+        chart_col, metric_col = st.columns([1, 2], vertical_alignment="center")
+        with chart_col:
+            st.altair_chart(convergence_donut(passed, failed), width="stretch")
+        with metric_col:
+            top = st.columns(2, border=True)
+            top[0].metric("Convergence", f"{100 * passed / len(runs):.0f}%" if runs else "—",
+                          f"{passed} of {len(runs)} questions", icon=":material/task_alt:")
+            top[1].metric("Diverged", failed, "awaiting review or governance",
+                          delta_color="off", icon=":material/report:")
+            bottom = st.columns(3, border=True)
+            bottom[0].metric("Total tokens", f"{total_tokens:,}", icon=":material/token:")
+            bottom[1].metric("Total time", f"{total_seconds:.1f}s", icon=":material/timer:")
+            bottom[2].metric("Avg latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
 
     st.markdown(results_table_html(runs), unsafe_allow_html=True)
     st.caption("Pass means convergence with FinanceBench's chosen convention, not an "
@@ -435,7 +481,7 @@ def render_detail(run: dict):
         st.badge(result["resolved_doc"] or "Unscoped", icon=":material/description:",
                  color="blue")
 
-    with st.container(border=True):
+    with st.container(border=True, key="answer-card"):
         st.markdown(f"### {q['question']}")
         cols = st.columns(2)
         with cols[0]:
@@ -573,8 +619,9 @@ with st.sidebar:
 selected_question = None if selection == "All questions" else company_questions[
     labels.index(selection) - 1
 ]
-with st.container(border=True):
-    prompt_area, action_area = st.columns([5, 1], vertical_alignment="center")
+with st.container(border=True, key="prompt-card"):
+    prompt_area, action_area = st.columns([8, 1.25], vertical_alignment="center",
+                                          gap="medium")
     with prompt_area:
         st.caption("Selected question" if selected_question else "Benchmark run")
         if selected_question:
