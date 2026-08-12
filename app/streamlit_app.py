@@ -31,6 +31,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Streamlit's wide layout reserves 5rem of horizontal padding either side and
+# 6rem on top, which pushes the widest rows (the results table, the run button)
+# off screen on a laptop display. Measured against the live DOM rather than
+# guessed.
+#
+# The top value must stay in rem, not px: the app header is absolutely
+# positioned and 3.75rem tall, so anything below that overlaps it. 3.5rem looked
+# fine until the root font size turned out to be 13px, at which point the first
+# card sat 3px under the header. 4rem clears it at any root size.
+LAYOUT_CSS = """
+<style>
+  .stMainBlockContainer { padding: 4rem 2rem 3rem 2rem; }
+  [data-testid="stSidebarHeader"] { height: 2.75rem; padding-top: 0.35rem;
+                                    padding-bottom: 0; }
+  [data-testid="stSidebarUserContent"] { padding-top: 0; }
+</style>
+"""
+st.markdown(LAYOUT_CSS, unsafe_allow_html=True)
+
 MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"]
 PHASE_HELP = {
     "1-vector": "Baseline · pure vector kNN across the corpus (2/8)",
