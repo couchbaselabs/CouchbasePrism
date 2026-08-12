@@ -7,11 +7,13 @@ Run from the repository root:
 The app deliberately calls ``prism.runtime.answer_question`` and
 ``eval.judge.score``. It does not maintain a friendlier demo-only pipeline.
 """
+import html
 import json
 import pathlib
 import sys
 import time
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -277,52 +279,131 @@ def render_pipeline_trace(run: dict):
         st.write(run["verdict"].get("comment", ""))
 
 
+PASS_COLOR = "#1a7f37"
+FAIL_COLOR = "#cf222e"
+
+# st.dataframe truncates every cell and makes the reader click to read an
+# answer, which is the wrong shape for a comparison table where the answers ARE
+# the content. This renders a fully expanded table instead: nothing clipped,
+# nothing scrollable, every row readable top to bottom.
+RESULTS_TABLE_CSS = """
+<style>
+.prism-results { width: 100%; border-collapse: collapse; font-size: 0.86rem;
+                 line-height: 1.45; table-layout: fixed; }
+.prism-results th { text-align: left; font-weight: 600; padding: 0.6rem 0.7rem;
+                    border-bottom: 2px solid rgba(128,128,128,0.35);
+                    vertical-align: bottom; white-space: nowrap; }
+.prism-results td { padding: 0.7rem; vertical-align: top;
+                    border-bottom: 1px solid rgba(128,128,128,0.18);
+                    overflow-wrap: anywhere; }
+.prism-results tr:nth-child(even) td { background: rgba(128,128,128,0.05); }
+/* nowrap matters: the cell sets overflow-wrap:anywhere for long prose, which
+   without this breaks the pill itself into "PAS / S". */
+.prism-pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+              color: #fff; font-weight: 700; font-size: 0.75rem; letter-spacing: .03em;
+              white-space: nowrap; overflow-wrap: normal; }
+.prism-num { text-align: right; font-variant-numeric: tabular-nums;
+             white-space: nowrap; color: rgba(128,128,128,0.95); }
+.prism-doc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size: 0.76rem; overflow-wrap: anywhere; }
+</style>
+"""
+
+RESULT_COLUMNS = [
+    ("Status", "9%"), ("Question", "19%"), ("FinanceBench answer", "21%"),
+    ("PRISM answer", "25%"), ("Why", "15%"), ("Document", "11%"),
+]
+
+
+def results_table_html(runs: list) -> str:
+    header = "".join(f"<th>{html.escape(name)}</th>" for name, _ in RESULT_COLUMNS)
+    cols = "".join(f'<col style="width:{width}">' for _, width in RESULT_COLUMNS)
+    body = []
+    for run in runs:
+        q, result, verdict = run["question"], run["result"], run["verdict"]
+        passed = verdict["passed"]
+        colour = PASS_COLOR if passed else FAIL_COLOR
+        label = "PASS" if passed else "FAIL"
+        cells = [
+            f'<td><span class="prism-pill" style="background:{colour}">{label}</span>'
+            f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
+            f'{html.escape(q["id"].replace("financebench_id_", "#"))}</div></td>',
+            f'<td>{html.escape(q["question"])}</td>',
+            f'<td>{html.escape(q["expected_answer"])}</td>',
+            f'<td>{html.escape(result["answer"])}</td>',
+            f'<td>{html.escape(verdict.get("comment") or "")}</td>',
+            f'<td class="prism-doc">{html.escape(result["resolved_doc"] or "unscoped")}'
+            f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
+            f'{run["stats"]["total_tokens"]:,} tok · '
+            f'{run["stats"]["elapsed_ms"] / 1000:.1f}s</div></td>',
+        ]
+        body.append(f"<tr>{''.join(cells)}</tr>")
+    return (RESULTS_TABLE_CSS +
+            f'<table class="prism-results"><colgroup>{cols}</colgroup>'
+            f"<thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+
+
+def convergence_donut(passed: int, failed: int):
+    source = pd.DataFrame({"Result": ["Converged", "Diverged"],
+                           "Questions": [passed, failed]})
+    return (
+        alt.Chart(source)
+        .mark_arc(innerRadius=52, outerRadius=88, stroke="white", strokeWidth=2)
+        .encode(
+            theta=alt.Theta("Questions:Q", stack=True),
+            color=alt.Color(
+                "Result:N",
+                scale=alt.Scale(domain=["Converged", "Diverged"],
+                                range=[PASS_COLOR, FAIL_COLOR]),
+                legend=alt.Legend(orient="bottom", title=None)),
+            tooltip=["Result:N", "Questions:Q"],
+        )
+        .properties(height=230)
+    )
+
+
 def render_batch(runs: list, company: str, phase: str, model: str):
     section(f"{company} benchmark", f"{len(runs)} questions · {phase} · OpenAI {model}",
             ":material/analytics:")
-    rows = []
-    for run in runs:
-        q, result, verdict, stats = (run["question"], run["result"],
-                                     run["verdict"], run["stats"])
-        rows.append({
-            "Status": "Pass" if verdict["passed"] else "Fail",
-            "Question": q["question"],
-            "Gold answer": q["expected_answer"],
-            "PRISM answer": result["answer"],
-            "Document": result["resolved_doc"],
-            "Tokens": stats["total_tokens"],
-            "Time (s)": stats["elapsed_ms"] / 1000,
-        })
-    frame = pd.DataFrame(rows)
+
     passed = sum(1 for r in runs if r["verdict"]["passed"] is True)
+    failed = len(runs) - passed
     total_tokens = sum(r["stats"]["total_tokens"] for r in runs)
     total_seconds = sum(r["stats"]["elapsed_ms"] for r in runs) / 1000
     avg_seconds = total_seconds / len(runs) if runs else 0
 
-    metrics = st.columns(4, border=True)
-    metrics[0].metric("Convergence", f"{100 * passed / len(runs):.0f}%" if runs else "—",
-                      f"{passed}/{len(runs)} questions", icon=":material/task_alt:")
-    metrics[1].metric("Total tokens", f"{total_tokens:,}", icon=":material/token:")
-    metrics[2].metric("Total time", f"{total_seconds:.1f}s", icon=":material/timer:")
-    metrics[3].metric("Average latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
+    chart_col, metric_col = st.columns([1, 2], vertical_alignment="center")
+    with chart_col:
+        st.altair_chart(convergence_donut(passed, failed), width="stretch")
+    with metric_col:
+        top = st.columns(2, border=True)
+        top[0].metric("Convergence", f"{100 * passed / len(runs):.0f}%" if runs else "—",
+                      f"{passed} of {len(runs)} questions", icon=":material/task_alt:")
+        top[1].metric("Diverged", failed, "awaiting review or governance",
+                      delta_color="off", icon=":material/report:")
+        bottom = st.columns(3, border=True)
+        bottom[0].metric("Total tokens", f"{total_tokens:,}", icon=":material/token:")
+        bottom[1].metric("Total time", f"{total_seconds:.1f}s", icon=":material/timer:")
+        bottom[2].metric("Avg latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
 
-    st.dataframe(
-        frame,
-        hide_index=True,
-        width="stretch",
-        height="content",
-        column_config={
-            "Status": st.column_config.TextColumn(width="small", pinned=True),
-            "Question": st.column_config.TextColumn(width="large", pinned=True),
-            "Gold answer": st.column_config.TextColumn(width="large"),
-            "PRISM answer": st.column_config.TextColumn(width="large"),
-            "Document": st.column_config.TextColumn(width="medium"),
-            "Tokens": st.column_config.NumberColumn(format="localized", width="small"),
-            "Time (s)": st.column_config.NumberColumn(format="%.2f", width="small"),
-        },
-    )
+    st.markdown(results_table_html(runs), unsafe_allow_html=True)
     st.caption("Pass means convergence with FinanceBench's chosen convention, not an "
                "assertion that other defensible conventions are objectively wrong.")
+
+    # A failing row raises "why?", and the trace is the answer - so make it
+    # reachable without re-running the question on its own.
+    st.divider()
+    section("Inspect a run", "Full pipeline trace for any question in this batch",
+            ":material/manage_search:")
+    options = {
+        f"{'✅' if r['verdict']['passed'] else '❌'}  "
+        f"{r['question']['id'].replace('financebench_id_', '#')} · "
+        f"{r['question']['question'][:70]}": r
+        for r in runs
+    }
+    chosen = st.selectbox("Question", list(options), label_visibility="collapsed")
+    if chosen:
+        render_detail(options[chosen])
 
 
 def render_detail(run: dict):

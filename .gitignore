@@ -27,3 +27,8 @@ out/
 .idea/
 .vscode/
 *.swp
+
+# Streamlit auto-generates these as symlinks into .venv (with a hardcoded
+# python3.x path), so they dangle on any other machine.
+.agents/
+.claude/skills/
