@@ -1,0 +1,8 @@
+# PRISM runtime + eval + demo. Deliberately small: PDF parsing is a fast
+# cover-page pass, chunking/embedding is done by the Couchbase AI Data Plane,
+# and Couchbase access is over the Query REST service.
+pymupdf>=1.24
+pyyaml>=6.0
+requests>=2.31
+streamlit>=1.35
+pytest>=8.0

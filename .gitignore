@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dictionary is environment/customer state, not source
+dictionary.yaml
+
+# Cloned benchmark corpus — 1.2GB and its own git repo.
+# git clone https://github.com/patronus-ai/financebench
+financebench/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Run output
+out/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
