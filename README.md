@@ -71,11 +71,11 @@ git clone https://github.com/patronus-ai/financebench   # the test corpus
 # build the catalog for a corpus (one document per PDF)
 python manage.py build-catalog --corpus financebench --company 3M
 
-# run the benchmark (phase 5 = the full runtime, the default)
+# run the benchmark (3-hybrid, the preferred architecture, is the default)
 python -m eval.run_benchmark --company 3M --out out/cold.json
 
-# reproduce the whole progression — each phase isolates one capability
-for p in 1-vector 2-catalog 3-hybrid 4-planner 5-runtime; do
+# reproduce the progression — each phase adds one layer
+for p in 1-vector 2-catalog 3-hybrid; do
   python -m eval.run_benchmark --company 3M --phase $p --out out/$p.json
 done
 
@@ -113,8 +113,14 @@ to judge it.
 an authorised verdict.
 
 On the 8 FinanceBench questions for 3M, convergence with FinanceBench's own
-conventions moved 25% (vector only) → 38% (catalog-filtered) → 50% (evidence
-planner) → **62%** (after one approval).
+conventions moved 25% (vector only) → 38% (catalog-scoped) → **62%** (hybrid,
+after one approved dictionary entry).
+
+| Architecture | What it adds | Converged |
+|---|---|---|
+| `1-vector` | textbook RAG — kNN over the whole corpus | 25% (2/8) |
+| `2-catalog` | resolve the document first, then search inside it | 38% (3/8) |
+| `3-hybrid` | BM25 + content anchors + kNN via `SEARCH()`, plus binding, deterministic calculation and governance | **62%** (5/8) |
 
 "Converged" is the honest word. Several quick-ratio and ROA conventions are
 defensible finance; FinanceBench expects particular ones. Reporting this as
@@ -148,7 +154,7 @@ prism/                    the system, corpus-agnostic
     answer.py             prose around numbers already computed
     pipeline.py           answer_question() — the single entry point
 eval/
-  phases/                 the five phases, as CONFIGURATIONS of one runtime
+  phases/                 the three architectures, as CONFIGURATIONS of one runtime
   corpora/                swappable corpus adapters
   run_benchmark.py        run and score
   debug_question.py       one question, every stage

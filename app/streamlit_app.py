@@ -85,11 +85,10 @@ st.html("""
 """)
 MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"]
 PHASE_HELP = {
-    "1-vector": "Baseline · pure vector kNN across the corpus (2/8)",
-    "2-catalog": "Adds deterministic document scoping (3/8)",
-    "3-hybrid": "Adds whole-question BM25 + kNN; no gain in this sample (3/8)",
-    "4-planner": "Uses planner-generated content anchors (4/8)",
-    "5-runtime": "Adds binding, calculation and governed semantics (4/8 cold, 5/8 learned)",
+    "1-vector": "Textbook RAG · kNN across the whole corpus, no scoping",
+    "2-catalog": "Adds catalog-resolved document scoping before similarity",
+    "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
+                "with binding, deterministic calculation and governance",
 }
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
@@ -586,8 +585,9 @@ with st.sidebar:
     company_questions = [q for q in questions if q["company"] == company]
     labels = ["All questions"] + [f"{q['id']} · {q['question'][:56]}" for q in company_questions]
     selection = st.selectbox("Question", labels)
-    phase = st.selectbox("Runtime phase", sorted(phases.PHASES),
-                         index=sorted(phases.PHASES).index(phases.DEFAULT_PHASE))
+    phase = st.selectbox("Retrieval architecture", sorted(phases.PHASES),
+                         index=sorted(phases.PHASES).index(phases.DEFAULT_PHASE),
+                         format_func=lambda p: phases.LABELS.get(p, p))
     st.caption(PHASE_HELP[phase])
 
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],

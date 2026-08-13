@@ -288,19 +288,29 @@ instead — free, unambiguous, no reason to route those through a judge).
 
 | Phase | Mechanism | Convergence with FinanceBench |
 |---|---|---|
-| 1 — vector only | Hyperscale Vector Index, `APPROX_VECTOR_DISTANCE`, no filter | 25% (2/8) |
-| 2 — catalog-filtered | regex resolves `doc_name` from question year/quarter (8/8 correct) against `catalog`, then vector search restricted to that document | 38% (3/8) |
-| 3 — hybrid | phase 2 + BM25 on LLM-extracted rare keywords + title-boosted match on `associated-titles`, via the `ftsFinanceBench` Search Vector Index | 38% (3/8), plateaued |
+| `1-vector` | Hyperscale Vector Index, `APPROX_VECTOR_DISTANCE`, no filter. Textbook RAG. | 25% (2/8) |
+| `2-catalog` | regex resolves `doc_name` from question year/quarter (8/8 correct) against `catalog`, then vector search restricted to that document | 38% (3/8) |
+| `3-hybrid` | + content anchors and BM25 alongside kNN through the `ftsFinanceBench` Search Vector Index, plus fact binding, deterministic calculation and dictionary governance | **62% (5/8)** |
 
-**Catalog-based filtering was the single highest-leverage change** — bigger
-than hybrid search. Phase 3 plateaued not because hybrid search is a bad idea,
-but because the remaining failure classes aren't retrieval problems at all: no
-amount of better search fixes a mislabeled section title, a table whose
-structure was destroyed at serialization, or an ungoverned formula choice.
+**Catalog-based document scoping was the single highest-leverage change**
+(25% → 38%) — bigger than hybrid search on its own. An intermediate
+configuration measured during development (catalog scoping + BM25 over the
+whole raw question, no anchors, no governance) scored 38%, exactly the same as
+catalog scoping alone: BM25 over an entire question adds nothing when the
+remaining failures are not ranking problems. What moved the number was content
+anchors and governance, both folded into `3-hybrid`.
 
-The runtime in §1 is the successor to phase 3. Its retrieval half inherits
-§3's `associated-titles` problem, mitigated (not eliminated) by planning with
-content anchors.
+An earlier five-phase split gave content anchors and governance their own
+steps. That was dropped because it left the *default* phase with `bm25=False` —
+the architecture being demonstrated never actually exercised the FTS index or
+emitted a `SEARCH()` query. Folding them in means the preferred configuration
+is the one that shows `SEARCH()`.
+
+`title_boost` is deliberately 0 in `3-hybrid`. Boosting
+`meta-data.associated-titles` is tempting but that field is wrong on a
+meaningful fraction of table chunks (§3), so weighting it promotes confidently
+wrong chunks. BM25 runs on `text-to-embed` only; the unreliable titles are
+sidestepped by content anchors instead.
 
 ## 6. Governance principles (apply across all three tiers)
 
