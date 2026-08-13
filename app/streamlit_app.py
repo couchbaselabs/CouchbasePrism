@@ -536,11 +536,28 @@ def render_detail(run: dict):
                            for c in calc["computed"]}
                 picked = st.selectbox("Approved convention", list(options),
                                       key=f"approve_{q['id']}")
-                use_threshold = st.toggle("Also approve an interpretation threshold", value=False,
-                                          key=f"threshold_toggle_{q['id']}")
+
+                # A judgment question cannot be answered by the formula alone -
+                # "is 0.96 healthy?" is a threshold opinion, and PRISM declines
+                # the verdict without an approved policy. Defaulting this off
+                # let a judgment be approved half-governed: the next run
+                # computed a number and still refused to characterise it, which
+                # reads as a bug rather than as the intended discipline.
+                needs_policy = result["answer_kind"] == "judgment"
+                use_threshold = st.toggle(
+                    "Also approve an interpretation threshold", value=needs_policy,
+                    key=f"threshold_toggle_{q['id']}",
+                    help="Required to answer a judgment question. The formula alone "
+                         "produces a number; deciding whether that number is healthy "
+                         "is a separate, separately-versioned decision.")
                 threshold = st.number_input("Healthy at or above", value=1.0, step=0.1,
                                             disabled=not use_threshold,
                                             key=f"threshold_{q['id']}")
+                if needs_policy and not use_threshold:
+                    st.warning("This question asks for a judgment. Without a threshold "
+                               "PRISM will compute the value and still decline the "
+                               "verdict.", icon=":material/info:")
+
                 if st.button("Approve and learn", type="primary",
                              icon=":material/verified:", key=f"approve_button_{q['id']}"):
                     dictionary.approve(result["concept"], options[picked]["formula"],
@@ -628,8 +645,27 @@ with st.sidebar:
     st.metric("Approved entries", len(approved), border=True)
     with st.expander("Dictionary entries", icon=":material/menu_book:"):
         if approved:
-            for entry in approved:
-                st.code(entry.get("id", ""), language=None)
+            # An id alone doesn't say what was approved, and the two entry types
+            # are the point: a metric without a policy computes a value but
+            # cannot deliver a verdict.
+            metrics = [e for e in approved if e.get("entry_type") == "metric"]
+            policies = {e.get("applies_to"): e for e in approved
+                        if e.get("entry_type") == "interpretation_policy"}
+            for entry in metrics:
+                st.markdown(f"**{entry.get('id')}**")
+                st.code(entry.get("interpretation", {}).get("formula", ""), language=None)
+                policy = policies.get(entry.get("id"))
+                if policy:
+                    rules = ", ".join(f"{k} {v}" for k, v in
+                                      (policy.get("policy") or {}).items())
+                    st.caption(f":material/gavel: policy · {rules}")
+                else:
+                    st.caption(":material/warning: no interpretation policy — computes a "
+                               "value, declines any verdict")
+            orphans = [p for a, p in policies.items()
+                       if a not in {e.get("id") for e in metrics}]
+            for policy in orphans:
+                st.caption(f"policy with no metric: {policy.get('id')}")
             # Resetting is a demo operation, not an accident to guard against:
             # the cold half of the two-pass story needs an empty dictionary, and
             # dropping to a terminal mid-demo breaks the narrative.
