@@ -190,6 +190,22 @@ def show_llm_exchange(event: dict, label: str):
         st.code(event.get("response") or event.get("error") or "", wrap_lines=True)
 
 
+def sql_kind(event: dict) -> str:
+    """Name each statement by what it actually does. Generic 'SQL++ 1 / 2'
+    labels made it impossible to tell at a glance whether the FTS index was
+    being used at all."""
+    statement = event.get("statement", "")
+    if "SEARCH_SCORE()" in statement or "SEARCH(" in statement:
+        return "Hybrid SEARCH() · BM25 + kNN via the Search Vector Index"
+    if "matched_anchors" in statement:
+        return "Content anchors · exact row-label match"
+    if "APPROX_VECTOR_DISTANCE" in statement:
+        return "Vector kNN · Hyperscale Vector Index"
+    if "`catalog`" in statement:
+        return "Catalog lookup"
+    return "SQL++"
+
+
 def show_sql(event: dict, label: str):
     elapsed = event.get("elapsed_ms", 0)
     st.caption(f"{label} · {event.get('row_count', 0)} rows · {elapsed:,.0f} ms")
@@ -211,13 +227,12 @@ def render_pipeline_trace(run: dict):
     embed_events = [e for e in events if e.get("type") == "embedding_call"]
     plan = result["plan"]
     options = result["options"]
-    retrieval_mode = (
-        "whole-question BM25 + vector kNN"
-        if options.bm25 else
-        "content anchors + vector kNN"
-        if options.anchors else
-        "vector kNN"
-    )
+    # These are independent switches, so describe every one that is on. An
+    # if/elif chain here reported only the first and made an active BM25 leg
+    # look like it was never running.
+    active = ([" content anchors"] if options.anchors else []) \
+        + (["BM25 lexical"] if options.bm25 else []) + ["vector kNN"]
+    retrieval_mode = " + ".join(part.strip() for part in active)
 
     with st.expander("1 · Filter — resolve the governed document scope", expanded=True,
                      icon=":material/filter_alt:"):
@@ -249,22 +264,27 @@ def render_pipeline_trace(run: dict):
                      expanded=True, icon=":material/manage_search:"):
         st.markdown("**In** · resolved document key + content anchors + question embedding  ")
         st.markdown(f"**Active strategy** · `{retrieval_mode}`  ")
+        work = []
         if options.anchors:
-            st.markdown("**Work** · exact content-anchor matches identify structurally relevant "
-                        "chunks; vector search fills the remaining evidence budget. Results are "
-                        "deduplicated with anchor hits first.  ")
-        elif options.bm25:
-            st.markdown("**Work** · send the full question to the Search Vector Index, combining "
-                        "BM25 lexical scores with vector similarity inside the resolved document.  ")
+            work.append("exact content-anchor matches identify structurally relevant chunks, "
+                        "ranked by anchor rarity rather than hit count")
+        if options.bm25:
+            work.append("the question goes to the **Search Vector Index**, which combines "
+                        "**BM25** lexical scoring with vector similarity in a single `SEARCH()` "
+                        "call")
         else:
-            st.markdown("**Work** · retrieve by vector similarity only, scoped to the resolved "
-                        "document when catalog filtering is enabled.  ")
+            work.append("vector similarity search fills the evidence budget")
+        if options.catalog_filter:
+            work.append("everything is scoped to the resolved document")
+        st.markdown("**Work** · " + "; ".join(work)
+                    + (". Results are deduplicated with anchor hits first.  "
+                       if options.anchors else ".  "))
         for event in embed_events:
             st.caption(f"Embedding · {event.get('dimensions', '—')} dimensions · "
                        f"{event.get('elapsed_ms', 0):,.0f} ms")
             st.json(event.get("request") or {}, expanded=False)
         for number, event in enumerate(sql_events, 1):
-            show_sql(event, f"SQL++ {number}")
+            show_sql(event, f"{number} · {sql_kind(event)}")
         st.markdown(f"**Out** · {len(result['chunks'])} evidence chunks")
 
     with st.expander("4 · Govern — apply approved semantics or surface ambiguity",
