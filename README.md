@@ -89,6 +89,13 @@ python manage.py approve "quick ratio" \
   --healthy-at-or-above 1.0
 python manage.py show-dictionary
 
+# clear it again — the cold half of the two-pass demo
+python manage.py reset-dictionary          # everything
+python manage.py forget "quick ratio"      # one concept only
+
+# or run cold without touching the approved dictionary at all
+PRISM_DICTIONARY=/tmp/empty.yaml python -m eval.run_benchmark --company 3M
+
 # demo
 streamlit run app/streamlit_app.py
 

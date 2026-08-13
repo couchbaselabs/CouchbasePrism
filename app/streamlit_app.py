@@ -630,6 +630,18 @@ with st.sidebar:
         if approved:
             for entry in approved:
                 st.code(entry.get("id", ""), language=None)
+            # Resetting is a demo operation, not an accident to guard against:
+            # the cold half of the two-pass story needs an empty dictionary, and
+            # dropping to a terminal mid-demo breaks the narrative.
+            if st.button("Reset dictionary", icon=":material/restart_alt:",
+                         width="stretch",
+                         help="Empty the dictionary to demonstrate the ungoverned "
+                              "path again. Equivalent to `manage.py reset-dictionary`."):
+                dictionary.clear()
+                st.session_state.pop("showcase_runs", None)
+                st.toast("Dictionary cleared — concepts are ungoverned again.",
+                         icon=":material/restart_alt:")
+                st.rerun()
         else:
             st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
 

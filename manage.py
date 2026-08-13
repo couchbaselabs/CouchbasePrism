@@ -56,6 +56,40 @@ def show_dictionary(args):
     print(yaml.safe_dump(data, sort_keys=False, width=100))
 
 
+def _confirm(prompt: str, assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+
+
+def forget(args):
+    """Drop one concept, so the ungoverned path can be demonstrated again for
+    it without discarding everything else that has been reviewed."""
+    entry = dictionary.find_metric(dictionary.load(), args.concept)
+    if entry is None:
+        sys.exit(f"no approved entry matches {args.concept!r}")
+    print(f"will remove {entry['id']}: {entry['interpretation']['formula']}",
+          file=sys.stderr)
+    if not _confirm("Remove it?", args.yes):
+        sys.exit("aborted")
+    for removed in dictionary.forget(args.concept):
+        print(f"removed {removed}", file=sys.stderr)
+
+
+def reset_dictionary(args):
+    """Empty the dictionary — the cold half of the two-pass demo."""
+    entries = dictionary.load().get("entries", [])
+    if not entries:
+        print("already empty", file=sys.stderr)
+        return
+    for entry in entries:
+        print(f"will remove {entry.get('id')}", file=sys.stderr)
+    if not _confirm(f"Remove all {len(entries)} entries?", args.yes):
+        sys.exit("aborted")
+    dictionary.clear()
+    print(f"cleared {config.DICTIONARY_PATH}", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -75,6 +109,15 @@ def main():
 
     s = sub.add_parser("show-dictionary")
     s.set_defaults(func=show_dictionary)
+
+    f = sub.add_parser("forget", help="drop one concept's entry and its policy")
+    f.add_argument("concept")
+    f.add_argument("--yes", action="store_true", help="skip confirmation")
+    f.set_defaults(func=forget)
+
+    r = sub.add_parser("reset-dictionary", help="empty the dictionary (cold demo)")
+    r.add_argument("--yes", action="store_true", help="skip confirmation")
+    r.set_defaults(func=reset_dictionary)
 
     args = ap.parse_args()
     args.func(args)

@@ -14,9 +14,9 @@ PRISM may compute a metric without holding authority to judge it.
     repository  YAML persistence
     matching    concept -> approved entry
     policy      value + policy -> verdict
-    approval    the human decision
+    approval    the human decision (approve / forget / clear)
 """
-from .approval import approve  # noqa: F401
+from .approval import approve, clear, forget  # noqa: F401
 from .evaluator import FormulaError, evaluate_formula, formula_facts  # noqa: F401
 from .matching import find_metric, find_policy  # noqa: F401
 from .policy import judge  # noqa: F401

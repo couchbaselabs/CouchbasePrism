@@ -79,3 +79,48 @@ def test_judge_is_inclusive_at_the_threshold():
 def test_judge_declines_a_policy_shape_it_does_not_understand():
     verdict, reason = judge(0.5, {"policy": {"some_future_rule": 3}})
     assert verdict is None and "no rule" in reason
+
+
+# ------------------------------------------------------- forget and clear
+
+def _seeded(path):
+    from prism.dictionary import approve
+    approve("quick ratio", "(a - b) / c", healthy_at_or_above=1.0, path=path)
+    approve("current ratio", "a / c", path=path)
+    return path
+
+
+def test_forget_removes_the_metric_and_its_policy_together(tmp_path):
+    from prism.dictionary import find_metric, find_policy, forget, load
+    path = _seeded(tmp_path / "d.yaml")
+    removed = forget("quick ratio", path=path)
+    assert set(removed) == {"finance.quick_ratio", "finance.quick_ratio.policy"}
+    data = load(path)
+    assert find_metric(data, "quick ratio") is None
+    assert find_policy(data, "finance.quick_ratio") is None
+    # and leaves everything else that was reviewed alone
+    assert find_metric(data, "current ratio") is not None
+
+
+def test_forget_is_a_no_op_for_an_unknown_concept(tmp_path):
+    from prism.dictionary import forget, load
+    path = _seeded(tmp_path / "d.yaml")
+    assert forget("gross margin", path=path) == []
+    assert len(load(path)["entries"]) == 3
+
+
+def test_clear_empties_the_dictionary(tmp_path):
+    from prism.dictionary import clear, load
+    path = _seeded(tmp_path / "d.yaml")
+    removed = clear(path=path)
+    assert len(removed) == 3
+    assert load(path) == {"entries": []}
+
+
+def test_a_cleared_dictionary_still_loads(tmp_path):
+    # PRISM operating with an empty dictionary is the whole claim, so this must
+    # be an ordinary state rather than an error path.
+    from prism.dictionary import clear, find_metric, load
+    path = _seeded(tmp_path / "d.yaml")
+    clear(path=path)
+    assert find_metric(load(path), "quick ratio") is None

@@ -7,6 +7,7 @@ that decision becomes locked behaviour for every future matching question.
 import re
 
 from .evaluator import formula_facts
+from .matching import find_metric
 from .repository import load, save
 
 
@@ -43,3 +44,31 @@ def approve(concept: str, formula: str, healthy_at_or_above=None,
         })
     save(dictionary, path)
     return dictionary
+
+
+def forget(concept: str, path=None) -> list:
+    """Remove one concept's metric entry and its policy, returning the ids
+    dropped. The inverse of `approve` - useful for re-demonstrating the
+    ungoverned path for a single concept without discarding everything else
+    that has been reviewed."""
+    dictionary = load(path)
+    entry = find_metric(dictionary, concept)
+    if entry is None:
+        return []
+    metric_id = entry["id"]
+    removed = [e["id"] for e in dictionary["entries"]
+               if e.get("id") == metric_id or e.get("applies_to") == metric_id]
+    dictionary["entries"] = [e for e in dictionary["entries"]
+                             if e.get("id") not in removed
+                             and e.get("applies_to") != metric_id]
+    save(dictionary, path)
+    return removed
+
+
+def clear(path=None) -> list:
+    """Empty the dictionary. PRISM operates fine like this - that is the whole
+    claim - so this is how the cold half of the two-pass demo is set up."""
+    dictionary = load(path)
+    removed = [e.get("id") for e in dictionary.get("entries", [])]
+    save({"entries": []}, path)
+    return removed
