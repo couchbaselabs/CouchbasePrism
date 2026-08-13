@@ -184,16 +184,24 @@ def llm_role(event: dict) -> str:
 
 
 def show_llm_exchange(event: dict, label: str):
+    """The prompt is the interesting part of an LLM call, so it is rendered as
+    readable text. Collapsed JSON technically contained it, but as one escaped
+    string per message - unreadable exactly when it matters, which is while
+    working out why a prompt produced the plan it did."""
     request = event.get("request") or {}
     usage = event.get("usage") or {}
     elapsed = event.get("elapsed_ms", 0)
     st.caption(f"{label} · {request.get('model', 'model')} · "
                f"{usage.get('total_tokens', '—')} tokens · {elapsed:,.0f} ms")
-    request_tab, response_tab = st.tabs(["Request", "Response"])
-    with request_tab:
-        st.json(request, expanded=False)
+    prompt_tab, response_tab, raw_tab = st.tabs(["Prompt", "Response", "Raw request"])
+    with prompt_tab:
+        for message in request.get("messages") or []:
+            st.markdown(f"**{message.get('role', 'message')}**")
+            st.code(str(message.get("content", "")), wrap_lines=True)
     with response_tab:
         st.code(event.get("response") or event.get("error") or "", wrap_lines=True)
+    with raw_tab:
+        st.json(request, expanded=False)
 
 
 def sql_kind(event: dict) -> str:
@@ -226,9 +234,14 @@ def show_sql(event: dict, label: str):
 
 def render_pipeline_trace(run: dict):
     q, result, events = run["question"], run["result"], run["events"]
-    llms = {role: [e for e in events if e.get("type") == "llm_call"
-                   and llm_role(e) == role]
+    llm_events = [e for e in events if e.get("type") == "llm_call"]
+    llms = {role: [e for e in llm_events if llm_role(e) == role]
             for role in ("planner", "candidate", "binder", "answer", "judge")}
+    # Every call must surface somewhere. When classification silently dropped
+    # calls into the wrong bucket, the trace lost the planner and binder
+    # prompts entirely and looked merely sparse rather than broken.
+    classified = {id(e) for bucket in llms.values() for e in bucket}
+    llms["unclassified"] = [e for e in llm_events if id(e) not in classified]
     sql_events = [e for e in events if e.get("type") == "couchbase_query"]
     embed_events = [e for e in events if e.get("type") == "embedding_call"]
     plan = result["plan"]
@@ -261,8 +274,9 @@ def render_pipeline_trace(run: dict):
         st.markdown("**In** · question  ")
         st.markdown("**Work** · the planner identifies the concept, answer type, facts, "
                     "artifact types and verbatim content anchors. No dictionary is required.  ")
-        if llms["planner"]:
-            show_llm_exchange(llms["planner"][0], "Evidence planner")
+        for number, event in enumerate(llms["planner"], 1):
+            show_llm_exchange(event, "Evidence planner"
+                              + (f" · call {number}" if len(llms["planner"]) > 1 else ""))
         st.markdown("**Out**")
         st.json(plan, expanded=True)
 
@@ -301,8 +315,9 @@ def render_pipeline_trace(run: dict):
         else:
             st.warning("No approved metric matched. Candidate interpretations may be proposed.")
         st.write("Interpretation policy:", "Approved" if result["has_policy"] else "None")
-        if llms["candidate"]:
-            show_llm_exchange(llms["candidate"][0], "Candidate-formula proposal")
+        for number, event in enumerate(llms["candidate"], 1):
+            show_llm_exchange(event, "Candidate-formula proposal"
+                              + (f" · call {number}" if len(llms["candidate"]) > 1 else ""))
         if result["candidates"]:
             st.json(result["candidates"], expanded=True)
 
@@ -311,8 +326,9 @@ def render_pipeline_trace(run: dict):
         st.markdown("**In** · required fact names + retrieved evidence  ")
         st.markdown("**Work** · bind each value to entity, units, period, printed row and "
                     "source page; reject values absent from the retrieved text or mixed periods.  ")
-        if llms["binder"]:
-            show_llm_exchange(llms["binder"][0], "Fact binder")
+        for number, event in enumerate(llms["binder"], 1):
+            show_llm_exchange(event, "Fact binder"
+                              + (f" · call {number}" if len(llms["binder"]) > 1 else ""))
         if result["bound_facts"]:
             st.dataframe([{
                 "Grounded": bool(f.get("grounded")), "Fact": f.get("name"),
@@ -342,18 +358,29 @@ def render_pipeline_trace(run: dict):
     with st.expander("7 · Answer — synthesize prose around grounded evidence", expanded=True,
                      icon=":material/chat:"):
         st.markdown("**In** · evidence chunks + already-computed values + validation state  ")
-        if llms["answer"]:
-            show_llm_exchange(llms["answer"][0], "Answer synthesis")
+        for number, event in enumerate(llms["answer"], 1):
+            show_llm_exchange(event, "Answer synthesis"
+                              + (f" · call {number}" if len(llms["answer"]) > 1 else ""))
         st.markdown("**Out**")
         st.info(result["answer"], icon=":material/auto_awesome:")
 
     with st.expander("8 · Evaluate — compare with the benchmark convention",
                      icon=":material/fact_check:"):
         st.caption("Evaluation-only. This is not part of a production answer path.")
-        if llms["judge"]:
-            show_llm_exchange(llms["judge"][0], "FinanceBench judge")
+        for number, event in enumerate(llms["judge"], 1):
+            show_llm_exchange(event, "FinanceBench judge"
+                              + (f" · call {number}" if len(llms["judge"]) > 1 else ""))
         status_badge(run["verdict"]["passed"])
         st.write(run["verdict"].get("comment", ""))
+
+    if llms["unclassified"]:
+        with st.expander(f"Unclassified LLM calls ({len(llms['unclassified'])})",
+                         icon=":material/help:"):
+            st.caption("These calls could not be attributed to a pipeline stage. A trace "
+                       "recorded before stage tagging existed will land here; so will a "
+                       "call site that forgot to tag itself.")
+            for number, event in enumerate(llms["unclassified"], 1):
+                show_llm_exchange(event, f"Untagged call {number}")
 
 
 PASS_COLOR = "#1a7f37"
