@@ -17,7 +17,7 @@ import sys
 
 from eval import judge, phases
 from eval.corpora import load as load_corpus
-from prism import catalog, dictionary, runtime, trace
+from prism import catalog, dictionary, retrieval, runtime, trace
 
 
 def rule(title: str) -> None:
@@ -65,8 +65,9 @@ def main():
     plan = result["plan"]
     print(f"concept        : {plan.get('concept')}")
     print(f"answer_kind    : {plan.get('answer_kind')}")
-    print(f"required_facts : {plan.get('required_facts')}")
-    print(f"content_anchors: {plan.get('content_anchors')}")
+    for fact in retrieval.plan_facts(plan):
+        print(f"  fact {fact.get('id')}: {fact.get('description', '')}")
+        print(f"       anchors: {fact.get('content_anchors')}")
 
     rule(f"RETRIEVAL — {len(result['chunks'])} chunks")
     for i, c in enumerate(result["chunks"], 1):
@@ -95,8 +96,10 @@ def main():
     if result["candidates"]:
         rule("CANDIDATE INTERPRETATIONS (proposed, not exhaustive)")
         for c in result["candidates"]:
-            print(f"- {c.get('label')}: {c.get('formula')}")
+            print(f"- {c.get('method_name') or c.get('candidate_id')}: {c.get('formula')}")
             print(f"    {c.get('rationale')}")
+        for c in result.get("rejected_candidates") or []:
+            print(f"- REJECTED {c.get('method_name')}: {c.get('rejected_because')}")
 
     calc = result["calculation"]
     if calc["computed"] or calc["errors"]:

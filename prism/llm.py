@@ -16,7 +16,12 @@ from . import config, trace
 CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 
-def _post(body: dict, timeout: int) -> dict:
+def _post(body: dict, timeout: int, stage: str = None) -> dict:
+    """`stage` names which pipeline step made the call - planner, binder,
+    candidate, answer, judge. It is recorded on the trace event so the UI can
+    label calls without inspecting prompt text; sniffing prompts for
+    identifying phrases silently misclassified every call the moment a prompt
+    was reworded."""
     started = time.perf_counter()
     try:
         resp = requests.post(
@@ -27,18 +32,19 @@ def _post(body: dict, timeout: int) -> dict:
         resp.raise_for_status()
         result = resp.json()
         content = result["choices"][0]["message"]["content"]
-        trace.add("llm_call", endpoint=CHAT_URL, request=body, response=content,
-                  usage=result.get("usage"),
+        trace.add("llm_call", stage=stage, endpoint=CHAT_URL, request=body,
+                  response=content, usage=result.get("usage"),
                   elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
         return result
     except Exception as exc:
-        trace.add("llm_call", endpoint=CHAT_URL, request=body,
+        trace.add("llm_call", stage=stage, endpoint=CHAT_URL, request=body,
                   error=f"{type(exc).__name__}: {exc}",
                   elapsed_ms=round((time.perf_counter() - started) * 1000, 1))
         raise
 
 
-def chat_json(system: str, user: str, model: str = None, timeout: int = 90) -> dict:
+def chat_json(system: str, user: str, model: str = None, timeout: int = 90,
+              stage: str = None) -> dict:
     """Structured call. Returns the parsed JSON object the model produced."""
     body = {
         "model": model or config.OPENAI_MODEL,
@@ -47,11 +53,11 @@ def chat_json(system: str, user: str, model: str = None, timeout: int = 90) -> d
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
     }
-    return json.loads(_post(body, timeout)["choices"][0]["message"]["content"])
+    return json.loads(_post(body, timeout, stage)["choices"][0]["message"]["content"])
 
 
 def chat_text(prompt: str, model: str = None, max_tokens: int = 500,
-              timeout: int = 90) -> str:
+              timeout: int = 90, stage: str = None) -> str:
     """Free-text call, used only for answer synthesis."""
     body = {
         "model": model or config.OPENAI_MODEL,
@@ -59,4 +65,4 @@ def chat_text(prompt: str, model: str = None, max_tokens: int = 500,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
-    return _post(body, timeout)["choices"][0]["message"]["content"]
+    return _post(body, timeout, stage)["choices"][0]["message"]["content"]

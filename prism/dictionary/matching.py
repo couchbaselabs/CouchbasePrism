@@ -7,7 +7,11 @@ human decision the whole design depends on.
 
 
 def _normalize(s: str) -> str:
-    return " ".join((s or "").lower().replace("-", " ").split())
+    """Underscores and hyphens are separators, not characters. A model asked for
+    a concept name returns "quick ratio", "quick-ratio" or "quick_ratio"
+    interchangeably, and treating those as three concepts silently disables
+    governance for two of them."""
+    return " ".join((s or "").lower().replace("-", " ").replace("_", " ").split())
 
 
 def find_metric(dictionary: dict, concept: str):

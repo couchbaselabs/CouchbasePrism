@@ -14,7 +14,9 @@ makes "learns as it goes" compatible with "doesn't drift":
 from .answer import (  # noqa: F401
     BASE_ANSWER_PROMPT, COMPUTED_ANSWER_PROMPT, render_computed_block, synthesize,
 )
-from .calculation import compute, propose_candidates  # noqa: F401
+from .calculation import (  # noqa: F401
+    candidate_facts, compute, propose_candidates, validate_candidate,
+)
 from .fact_binding import (  # noqa: F401
     bind_facts, format_chunks, grounded_facts, to_identifier, validate_bindings,
 )

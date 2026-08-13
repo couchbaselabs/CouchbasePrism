@@ -14,6 +14,7 @@ from .anchor_search import anchor_search  # noqa: F401
 from .combined_search import combine, retrieve  # noqa: F401
 from .hybrid_search import hybrid_search  # noqa: F401
 from .planner import (  # noqa: F401
-    PLANNER_SYSTEM_PROMPT, formula_identifiers, plan_evidence,
+    PLANNER_SYSTEM_PROMPT, fact_ids, formula_identifiers, plan_anchors,
+    plan_evidence, plan_facts,
 )
 from .vector_search import embed, vector_search  # noqa: F401

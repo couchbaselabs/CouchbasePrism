@@ -11,23 +11,44 @@ import re
 
 from .. import llm
 
-BINDER_SYSTEM_PROMPT = (
-    "You are binding named financial facts to specific values from filing excerpts. "
-    "Each requested fact is a snake_case identifier (e.g. total_current_assets, "
-    "inventory) naming a line item that appears in the excerpts under some printed row "
-    "label. Find the single figure each one refers to and report where it came from. Do "
-    "not compute anything and do not derive one fact from others - only report figures "
-    "printed in the excerpts.\n\n"
-    "Respond with exactly one JSON object:\n"
-    '{"facts": [{"name": "<the requested identifier, echoed exactly>", "value": <number, '
-    'no commas or currency symbols>, "units": "e.g. USD millions", "period": "the column '
-    'this figure sits under, e.g. June 30, 2023", "row_label": "the printed row label, '
-    'verbatim", "entity": "the company", "source_page": <page number>}]}\n\n'
-    "If a requested fact is genuinely not present, omit it rather than guessing or "
-    "substituting a related figure. Getting the COLUMN right matters as much as the row: "
-    "filings print several periods side by side and the wrong column is a silently wrong "
-    "answer."
-)
+BINDER_SYSTEM_PROMPT = """\
+You are binding named facts to specific values found in source excerpts.
+
+Each requested fact is a snake_case identifier naming a quantity that appears
+in the excerpts under some printed label. Locate the single value each one
+refers to and report where it came from.
+
+Report only values printed in the excerpts. Do not compute anything, do not
+derive one fact from another, and do not convert units.
+
+Return ONLY one valid JSON object:
+
+{
+  "facts": [
+    {
+      "name": "<the requested identifier, echoed exactly>",
+      "value": <number, no separators or symbols>,
+      "units": "<unit and scale as printed>",
+      "period": "<the column, period, or variant this value sits under>",
+      "row_label": "<the printed label, verbatim>",
+      "entity": "<the subject this value belongs to>",
+      "source_page": <page number>
+    }
+  ]
+}
+
+GUIDELINES:
+
+- Echo each requested identifier exactly; do not rename or normalise it.
+- If a requested fact is genuinely not present, omit it. Do not guess and do
+  not substitute a related quantity.
+- Sources commonly print several columns or variants side by side. Selecting
+  the wrong one produces a silently wrong answer, so identifying the correct
+  column matters as much as identifying the correct row.
+- Bind all facts from the same column or period unless the question asks
+  otherwise.
+- Return strictly valid JSON without markdown or explanatory text.
+"""
 
 
 def to_identifier(name: str) -> str:
@@ -49,7 +70,8 @@ def bind_facts(question: str, required: list, chunks: list, model: str = None) -
         return []
     user = (f"QUESTION: {question}\n\nFACTS TO BIND: {json.dumps(required)}\n\n"
             f"EXCERPTS:\n{format_chunks(chunks)}")
-    return llm.chat_json(BINDER_SYSTEM_PROMPT, user, model=model).get("facts", [])
+    return llm.chat_json(BINDER_SYSTEM_PROMPT, user, model=model,
+                         stage="binder").get("facts", [])
 
 
 def validate_bindings(bound: list, chunks: list) -> list:

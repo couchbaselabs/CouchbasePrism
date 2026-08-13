@@ -46,7 +46,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
 
     kind = plan.get("answer_kind")
     entry = policy = None
-    bound, candidates = [], []
+    bound, candidates, rejected = [], [], []
     calc = {"governed": False, "computed": [], "errors": []}
     conclusion = {}
 
@@ -55,7 +55,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         policy = dictionary.find_policy(dictionary_data, entry["id"]) if entry else None
 
         if kind in ("derived_metric", "judgment"):
-            planned = [to_identifier(f) for f in (plan.get("required_facts") or [])]
+            planned = [to_identifier(f) for f in retrieval.fact_ids(plan)]
             if entry:
                 needed = set(entry["interpretation"]["required_facts"])
             else:
@@ -63,8 +63,8 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                 # and what the candidates reference. The planner under-specifies:
                 # it omitted `inventory` for quick ratio, leaving the only
                 # correct formula with an unbound name and nothing computable.
-                candidates = propose_candidates(plan.get("concept", ""), question,
-                                                planned, model=model)
+                candidates, rejected = propose_candidates(
+                    plan.get("concept", ""), question, plan, model=model)
                 needed = set(planned)
                 for candidate in candidates:
                     needed |= retrieval.formula_identifiers(candidate.get("formula", ""))
@@ -88,6 +88,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         "chunks": chunks,
         "bound_facts": bound,
         "candidates": candidates,
+        "rejected_candidates": rejected,
         "calculation": calc,
         "conclusion": conclusion,
         "answer": answer,

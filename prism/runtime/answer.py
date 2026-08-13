@@ -10,20 +10,18 @@ from .. import llm
 from .fact_binding import format_chunks
 
 BASE_ANSWER_PROMPT = (
-    "You are a financial analyst specializing in SEC regulatory filings. Answer the "
-    "question using ONLY the provided excerpts. If the answer is not in them, say so "
-    "clearly. Cite sources by their [number].\n\n"
-    "Sources marked [TABLE] contain structured financial data and are usually the "
-    "authoritative source for a specific quantitative answer. When a question asks for a "
-    "number, a rate, or what drove a financial change, check [TABLE] sources first and "
-    "prefer their figures over a narrative source's paraphrase."
+    "Answer the question using ONLY the provided excerpts. If the answer is not in "
+    "them, say so clearly. Cite sources by their [number].\n\n"
+    "Sources marked [TABLE] contain structured data and are usually the authoritative "
+    "source for a specific quantitative answer. When a question asks for a value, a "
+    "rate, or what drove a change, check [TABLE] sources first and prefer their figures "
+    "over a narrative source's paraphrase."
 )
 
 COMPUTED_ANSWER_PROMPT = (
-    "You are a financial analyst specializing in SEC regulatory filings. You are given "
-    "filing excerpts AND a block of values that have already been computed "
-    "deterministically from figures bound to specific rows and columns of those "
-    "excerpts.\n\n"
+    "You are given source excerpts AND a block of values that have already been "
+    "computed deterministically from figures bound to specific rows and columns of "
+    "those excerpts.\n\n"
     "THE COMPUTED VALUES ARE THE ANSWER to the quantitative part of the question. Lead "
     "with them. Use them exactly as given - do NOT recompute, re-derive or adjust them, "
     "and do not substitute your own arithmetic.\n\n"
@@ -76,4 +74,4 @@ def synthesize(question: str, chunks: list, calc: dict, conclusion: dict,
     else:
         prompt = (f"{BASE_ANSWER_PROMPT}\n\nEXCERPTS:\n{context}\n\n"
                   f"QUESTION: {question}\n\nANSWER:")
-    return llm.chat_text(prompt, model=model)
+    return llm.chat_text(prompt, model=model, stage="answer")

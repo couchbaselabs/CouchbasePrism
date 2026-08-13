@@ -8,6 +8,7 @@ copies of it.
 """
 from .. import config
 from .anchor_search import anchor_search
+from .planner import plan_anchors
 from .hybrid_search import hybrid_search
 from .vector_search import embed, vector_search
 
@@ -37,7 +38,7 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
     round trip, so that path stays available but is not what the phases use.
     """
     embedding = embed(question)
-    anchors = (plan.get("content_anchors") or []) if use_anchors else []
+    anchors = plan_anchors(plan) if use_anchors else []
     if use_bm25:
         return hybrid_search(question, embedding, doc_name, anchors=anchors,
                              top_k=top_k, title_boost=title_boost)

@@ -1,7 +1,7 @@
 """Pure-logic tests for catalog resolution, date derivation, binding
 validation and conclusion agreement. Each case below corresponds to a bug that
 actually occurred during the FinanceBench evaluation."""
-from prism import catalog, runtime, trace
+from prism import catalog, retrieval, runtime, trace
 
 CATALOG = [
     {"doc_name": "3M_2018_10K", "doc_type": "10-K", "doc_period": 2018,
@@ -126,3 +126,50 @@ def test_trace_compacts_large_vectors():
     with trace.capture() as events:
         trace.add("query", params={"vector": [0.1] * 2048})
     assert events[0]["params"]["vector"] == "<vector: 2048 dimensions>"
+
+
+# ------------------------------------------------- generic plan/candidate schema
+
+def test_anchors_are_collected_across_facts_and_deduplicated():
+    plan = {"required_facts": [
+        {"id": "a", "content_anchors": ["Total assets", "Total assets"]},
+        {"id": "b", "content_anchors": ["Net income"]},
+    ]}
+    assert retrieval.plan_anchors(plan) == ["Total assets", "Net income"]
+    assert retrieval.fact_ids(plan) == ["a", "b"]
+
+
+def test_a_plan_that_drifts_to_the_old_flat_shape_still_runs():
+    # Models occasionally return bare strings where objects were asked for. A
+    # plan that loses its anchors is degraded; a run that crashes is broken.
+    plan = {"required_facts": ["inventory"], "content_anchors": ["Inventories"]}
+    assert retrieval.fact_ids(plan) == ["inventory"]
+    assert retrieval.plan_anchors(plan) == ["Inventories"]
+
+
+def test_a_formula_referencing_an_undeclared_fact_is_rejected():
+    # An undeclared identifier carries no anchors, so nothing will ever bind it
+    # and the candidate can only fail later with an opaque evaluation error.
+    problem = runtime.validate_candidate({
+        "formula": "a / (b + c)",
+        "required_facts": [{"id": "a", "content_anchors": ["Total assets"]}],
+    })
+    assert "['b', 'c']" in problem
+
+
+def test_a_well_formed_candidate_is_accepted():
+    assert runtime.validate_candidate({
+        "formula": "a / b",
+        "required_facts": [{"id": "a"}, {"id": "b"}],
+    }) == ""
+
+
+def test_candidate_facts_carry_anchors_the_plan_never_asked_for():
+    # This is the point of the schema change: a fact only one convention needs
+    # still arrives with the anchors required to retrieve it.
+    facts = runtime.candidate_facts([
+        {"required_facts": [{"id": "inventory", "content_anchors": ["Inventories"]}]},
+        {"required_facts": [{"id": "inventory", "content_anchors": ["Inventories"]},
+                            {"id": "prepaid", "content_anchors": ["Prepaid expenses"]}]},
+    ])
+    assert [f["id"] for f in facts] == ["inventory", "prepaid"]

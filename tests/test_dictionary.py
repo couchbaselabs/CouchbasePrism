@@ -124,3 +124,14 @@ def test_a_cleared_dictionary_still_loads(tmp_path):
     path = _seeded(tmp_path / "d.yaml")
     clear(path=path)
     assert find_metric(load(path), "quick ratio") is None
+
+
+def test_a_concept_named_with_underscores_still_matches_its_entry():
+    # The planner is free to return "quick ratio", "quick-ratio" or
+    # "quick_ratio". Treating those as three concepts left an approved entry
+    # unmatched and silently disabled governance for the question.
+    entry = {"entry_type": "metric",
+             "governance": {"status": "approved"},
+             "recognition": {"canonical_name": "quick ratio"}}
+    for spelling in ("quick ratio", "quick-ratio", "quick_ratio", "Quick Ratio"):
+        assert find_metric({"entries": [entry]}, spelling) is entry

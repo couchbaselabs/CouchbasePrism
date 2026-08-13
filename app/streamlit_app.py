@@ -164,13 +164,19 @@ def status_badge(passed):
 
 
 def llm_role(event: dict) -> str:
+    """Each call site tags itself via llm.chat_*(stage=...). The fallback below
+    only covers traces recorded before that tag existed - sniffing prompt text
+    was the original mechanism and it silently mislabelled every call the moment
+    a prompt was reworded."""
+    if event.get("stage"):
+        return event["stage"]
     messages = (event.get("request") or {}).get("messages") or []
     text = "\n".join(str(m.get("content", "")) for m in messages).lower()
-    if "planning what evidence is needed" in text:
+    if "planning the source evidence" in text:
         return "planner"
-    if "binding named financial facts" in text:
+    if "binding named facts" in text:
         return "binder"
-    if "proposing how a named financial concept" in text:
+    if "proposing possible calculation methods" in text:
         return "candidate"
     if "grading whether a candidate answer" in text:
         return "judge"
@@ -533,7 +539,7 @@ def render_detail(run: dict):
                 st.caption("Choose the convention this organization considers authoritative. "
                            "The next run executes it deterministically.")
                 options = {f"{c['label']} · {c['value']:.6g}": c
-                           for c in calc["computed"]}
+                           for c in calc["computed"]}  # label is method_name
                 picked = st.selectbox("Approved convention", list(options),
                                       key=f"approve_{q['id']}")
 
