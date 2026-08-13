@@ -29,12 +29,17 @@ def combine(*chunk_lists, top_k: int = config.TOP_K) -> list:
 def retrieve(question: str, plan: dict, doc_name: str = None, *,
              use_anchors: bool = True, use_bm25: bool = False,
              title_boost: float = 0.0, top_k: int = config.TOP_K) -> list:
+    """Every configuration issues exactly ONE statement.
+
+    With BM25 on, scope + lexical + vector are all legs of a single SEARCH(),
+    so there is one query plan, one score, and one thing to show when
+    explaining the architecture. Without it, anchors would need their own
+    round trip, so that path stays available but is not what the phases use.
+    """
     embedding = embed(question)
     anchors = (plan.get("content_anchors") or []) if use_anchors else []
-    anchor_chunks = anchor_search(anchors, doc_name) if (anchors and doc_name) else []
     if use_bm25:
-        semantic = hybrid_search(question, embedding, doc_name, top_k,
-                                 title_boost=title_boost)
-    else:
-        semantic = vector_search(embedding, doc_name, top_k)
-    return combine(anchor_chunks, semantic, top_k=top_k)
+        return hybrid_search(question, embedding, doc_name, anchors=anchors,
+                             top_k=top_k, title_boost=title_boost)
+    anchor_chunks = anchor_search(anchors, doc_name) if (anchors and doc_name) else []
+    return combine(anchor_chunks, vector_search(embedding, doc_name, top_k), top_k=top_k)

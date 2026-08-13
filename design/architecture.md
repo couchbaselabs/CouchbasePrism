@@ -290,7 +290,34 @@ instead — free, unambiguous, no reason to route those through a judge).
 |---|---|---|
 | `1-vector` | Hyperscale Vector Index, `APPROX_VECTOR_DISTANCE`, no filter. Textbook RAG. | 25% (2/8) |
 | `2-catalog` | regex resolves `doc_name` from question year/quarter (8/8 correct) against `catalog`, then vector search restricted to that document | 38% (3/8) |
-| `3-hybrid` | + content anchors and BM25 alongside kNN through the `ftsFinanceBench` Search Vector Index, plus fact binding, deterministic calculation and dictionary governance | **62% (5/8)** |
+| `3-hybrid` | document scope + BM25 over content anchors + kNN, all in **one** `SEARCH()` against the `ftsFinanceBench` Search Vector Index, plus fact binding, deterministic calculation and dictionary governance | **62% (5/8)** |
+
+Every configuration issues exactly **one** SQL++ statement. In `3-hybrid` the
+three legs are parts of a single `SEARCH()`:
+
+```
+query.conjuncts[0]   document scope    exact filename match
+query.conjuncts[1]   BM25 lexical      the planner's content anchors, as phrases
+knn                  vector kNN        with its own filter, so it is scoped too
+```
+
+Two details there are load-bearing:
+
+**BM25 matches the anchors, not the question.** An earlier version sent the raw
+prompt — *"Does 3M have a reasonably healthy liquidity profile… If the quick
+ratio is not relevant, please state that and explain why."* — which scores
+mostly on common words and measurably bought nothing. The planner already
+produces the verbatim printed row labels worth matching (`Total current
+assets`, `Total current liabilities`), and they go in as `match_phrase` so a
+multi-word label matches as a sequence rather than an OR over its tokens. BM25
+supplies rarity weighting natively, via IDF, which is what the standalone
+anchor path had to hand-roll as `1/log2(2+df)`.
+
+**The scope predicate lives inside `SEARCH()`, not in `WHERE`.** A scalar filter
+outside is applied by the Query service only *after* the Search service has
+returned its k results, so a selective filter against a small k can discard
+nearly everything. The filename sits in the conjuncts (scoping the lexical leg)
+and in the knn `filter` object (scoping the vector leg).
 
 **Catalog-based document scoping was the single highest-leverage change**
 (25% → 38%) — bigger than hybrid search on its own. An intermediate
