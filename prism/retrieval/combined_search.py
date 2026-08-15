@@ -32,23 +32,28 @@ def combine(*chunk_lists, top_k: int = config.TOP_K) -> list:
 def retrieve(question: str, plan: dict, doc_name: str = None, *,
              use_anchors: bool = True, use_bm25: bool = False,
              title_boost: float = 0.0, top_k: int = config.TOP_K,
-             repair: bool = True) -> list:
+             probe: bool = False, repair: bool = False) -> list:
     """Every configuration issues exactly ONE statement.
 
-    With BM25 on, scope + lexical + vector are all legs of a single SEARCH(),
-    so there is one query plan, one score, and one thing to show when
-    explaining the architecture. Without it, anchors would need their own
-    round trip, so that path stays available but is not what the phases use.
+    `probe` and `repair` are diagnostics and both default OFF, because each
+    costs a statement and neither earns it:
+
+      - probing drops anchors the corpus cannot match (62% of them), but a
+        `match_phrase` against an absent phrase contributes zero to BM25 rather
+        than a penalty, so removing it is bookkeeping, not retrieval.
+      - repair re-plans dead anchors from retrieved text, which is circular: it
+        reads what vector search already returned, so it cannot discover
+        vocabulary in a chunk that retrieval missed. The chunk it most needed
+        to see sat at vector rank 81.
+
+    They stay available for measurement - `probe` is how the 62% was
+    established - but the runtime path is one statement, as advertised.
     """
     embedding = embed(question)
     anchors = plan_anchors(plan) if use_anchors else []
-    if anchors:
-        # Drop anchors the corpus cannot match before they consume budget.
-        # 62% of generated anchors were dead on the 3M subset.
+    if anchors and (probe or repair):
         live, dead, _counts = filter_anchors(anchors, doc_name)
         if dead and repair:
-            # Look at the document, then plan again. The planner could not have
-            # known this vocabulary; it is in the corpus, not in the model.
             seen = vector_search(embedding, doc_name, top_k)
             fixed, _proposed = repair_anchors(question, dead, seen, doc_name)
             live = live + [a for a in fixed if a not in live]
