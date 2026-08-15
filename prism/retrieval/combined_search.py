@@ -8,6 +8,8 @@ copies of it.
 """
 from .. import config
 from .anchor_search import anchor_search
+from .anchor_probe import filter_anchors
+from .anchor_repair import repair_anchors
 from .planner import plan_anchors
 from .hybrid_search import hybrid_search
 from .vector_search import embed, vector_search
@@ -29,7 +31,8 @@ def combine(*chunk_lists, top_k: int = config.TOP_K) -> list:
 
 def retrieve(question: str, plan: dict, doc_name: str = None, *,
              use_anchors: bool = True, use_bm25: bool = False,
-             title_boost: float = 0.0, top_k: int = config.TOP_K) -> list:
+             title_boost: float = 0.0, top_k: int = config.TOP_K,
+             repair: bool = True) -> list:
     """Every configuration issues exactly ONE statement.
 
     With BM25 on, scope + lexical + vector are all legs of a single SEARCH(),
@@ -39,6 +42,20 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
     """
     embedding = embed(question)
     anchors = plan_anchors(plan) if use_anchors else []
+    if anchors:
+        # Drop anchors the corpus cannot match before they consume budget.
+        # 62% of generated anchors were dead on the 3M subset.
+        live, dead, _counts = filter_anchors(anchors, doc_name)
+        if dead and repair:
+            # Look at the document, then plan again. The planner could not have
+            # known this vocabulary; it is in the corpus, not in the model.
+            seen = vector_search(embedding, doc_name, top_k)
+            fixed, _proposed = repair_anchors(question, dead, seen, doc_name)
+            live = live + [a for a in fixed if a not in live]
+        # Not `live or anchors`: when every anchor is dead the lexical leg is
+        # worth nothing, and an empty list makes hybrid_search fall back to
+        # matching the question text instead of phrase-matching known misses.
+        anchors = live
     if use_bm25:
         return hybrid_search(question, embedding, doc_name, anchors=anchors,
                              top_k=top_k, title_boost=title_boost)

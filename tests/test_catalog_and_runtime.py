@@ -173,3 +173,12 @@ def test_candidate_facts_carry_anchors_the_plan_never_asked_for():
                             {"id": "prepaid", "content_anchors": ["Prepaid expenses"]}]},
     ])
     assert [f["id"] for f in facts] == ["inventory", "prepaid"]
+
+
+# ------------------------------------------------------- anchor repair
+
+def test_repair_is_skipped_when_there_is_nothing_to_repair():
+    # No dead anchors, or nothing retrieved to learn vocabulary from, must not
+    # cost a model call - repair is only worth paying for when it can work.
+    assert retrieval.repair_anchors("q", [], [{"text": "x"}]) == ([], [])
+    assert retrieval.repair_anchors("q", ["missing label"], []) == ([], [])
