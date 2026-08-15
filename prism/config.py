@@ -46,3 +46,11 @@ DICTIONARY_PATH = pathlib.Path(
 TOP_K = 10
 MAX_ANCHOR_CHUNKS = 6
 VECTOR_N_PROBES = 16
+# kNN candidate depth inside the hybrid SEARCH(). NOT a result count - it is
+# the pool the lexical leg is allowed to re-rank. Couchbase sums the two
+# scores, and a document outside the kNN candidates cannot be surfaced by BM25
+# no matter how well it matches: at k=50 the chunk holding 3M's FY2022
+# operating-margin table was unreachable despite being the single best lexical
+# hit in the filing; at k=100 it ranked 7th. Boosting cannot substitute, as
+# scores are normalised and boosting lowers them.
+KNN_CANDIDATES = 200

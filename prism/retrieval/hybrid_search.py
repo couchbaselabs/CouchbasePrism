@@ -45,7 +45,7 @@ SELECT_FIELDS = """
 
 def build_statement(question: str, embedding: list, doc_name: str = None,
                     anchors: list = None, top_k: int = config.TOP_K,
-                    knn_k: int = 50, title_boost: float = 0.0) -> tuple:
+                    knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0) -> tuple:
     """Returns (statement, params). Split from execution so the query shape can
     be tested without a cluster - this is the core retrieval path and its
     correctness is mostly in where the predicates land."""
@@ -95,7 +95,7 @@ def build_statement(question: str, embedding: list, doc_name: str = None,
 
 def hybrid_search(question: str, embedding: list, doc_name: str = None,
                   anchors: list = None, top_k: int = config.TOP_K,
-                  knn_k: int = 50, title_boost: float = 0.0) -> list:
+                  knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0) -> list:
     """One statement, three legs. `anchors` empty falls back to matching the
     question text, so the lexical leg still contributes something rather than
     dropping out entirely."""
