@@ -32,3 +32,7 @@ out/
 # python3.x path), so they dangle on any other machine.
 .agents/
 .claude/skills/
+
+# docling-serve exports used for one-off diagnosis (12MB+)
+file.json
+file.md
