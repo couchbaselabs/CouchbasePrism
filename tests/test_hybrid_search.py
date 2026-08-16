@@ -123,26 +123,52 @@ def test_rrf_ranks_by_position_not_by_score():
     # The whole point: BM25 scores (~0.2) and kNN scores (~1.0) are on
     # different scales, so summing them buried lexical-only hits. Ranking is
     # scale-free - a leg's top hit counts the same whatever it scored.
-    rows = [{"id": "lex-top", "leg": "lexical", "score": 0.21},
-            {"id": "vec-top", "leg": "vector", "score": 0.99}]
+    rows = [{"id": "lex-top", "channel": "bm25", "score": 0.21},
+            {"id": "vec-top", "channel": "vector", "score": 0.99}]
     assert [c["id"] for c in rrf_merge(rows)] == ["lex-top", "vec-top"]
 
 
 def test_rrf_rewards_a_chunk_both_legs_found():
     # Ranked 2nd by each leg beats anything ranked 1st by only one of them.
-    rows = [{"id": "lex-only", "leg": "lexical", "score": 0.9},
-            {"id": "both", "leg": "lexical", "score": 0.5},
-            {"id": "vec-only", "leg": "vector", "score": 0.9},
-            {"id": "both", "leg": "vector", "score": 0.5}]
+    rows = [{"id": "lex-only", "channel": "bm25", "score": 0.9},
+            {"id": "both", "channel": "bm25", "score": 0.5},
+            {"id": "vec-only", "channel": "vector", "score": 0.9},
+            {"id": "both", "channel": "vector", "score": 0.5}]
     merged = rrf_merge(rows)
     assert merged[0]["id"] == "both"
-    assert merged[0]["leg"] == "lexical+vector"
-    assert merged[0]["leg_ranks"] == {"lexical": 2, "vector": 2}
+    assert merged[0]["channel"] == "bm25+vector"
+    assert merged[0]["channels"]["bm25"]["rank"] == 2
+    assert merged[0]["channels"]["vector"]["rank"] == 2
 
 
 def test_rrf_does_not_trust_union_row_order():
     # UNION ALL guarantees no ordering across branches, so rank is derived from
     # each leg's own scores rather than from the order rows arrived in.
-    rows = [{"id": "weak", "leg": "lexical", "score": 0.1},
-            {"id": "strong", "leg": "lexical", "score": 0.8}]
+    rows = [{"id": "weak", "channel": "bm25", "score": 0.1},
+            {"id": "strong", "channel": "bm25", "score": 0.8}]
     assert [c["id"] for c in rrf_merge(rows)] == ["strong", "weak"]
+
+
+def test_rrf_exposes_the_arithmetic_per_channel():
+    # A fused number nobody can derive is not inspectable. Each chunk carries
+    # its rank, the raw score it came from, and that channel's contribution.
+    rows = [{"id": "x", "channel": "bm25", "score": 0.6695},
+            {"id": "y", "channel": "bm25", "score": 0.10},
+            {"id": "x", "channel": "vector", "score": 0.8127}]
+    top = rrf_merge(rows)[0]
+    assert top["id"] == "x"
+    assert top["channels"]["bm25"] == {
+        "rank": 1, "raw_score": 0.6695, "contribution": round(1 / 61, 6)}
+    assert top["channels"]["vector"]["rank"] == 1
+    assert top["rrf_score"] == round(1 / 61 + 1 / 61, 6)
+
+
+def test_channel_weights_shift_the_ordering():
+    # Equal weights are a default, not a law. Weighting bm25 to zero must leave
+    # the vector channel deciding on its own.
+    rows = [{"id": "lex", "channel": "bm25", "score": 0.9},
+            {"id": "vec", "channel": "vector", "score": 0.9}]
+    assert [c["id"] for c in rrf_merge(rows)][0] == "lex"   # tie, insertion order
+    weighted = rrf_merge(rows, weights={"bm25": 0.0, "vector": 1.0})
+    assert weighted[0]["id"] == "vec"
+    assert weighted[0]["rrf_score"] > weighted[1]["rrf_score"]

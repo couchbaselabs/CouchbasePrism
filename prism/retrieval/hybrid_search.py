@@ -34,9 +34,20 @@ no verbatim anchor the planner produced could reach.
 **The scope predicate lives INSIDE SEARCH().** A scalar filter in the WHERE
 clause is applied only after the Search service has returned its results, so
 with a selective filter the top hits can all belong to other documents and be
-discarded.
+discarded. On the lexical leg it is a conjunct; on the vector leg it is the
+knn `filter`, and NOT also a `query`.
+
+That distinction matters: `query` and `knn` in one search object are unioned
+and their scores summed, so a `query` matching the filename would add every
+chunk in the filing to the vector leg. Today that happens to be harmless -
+`xmeta-data.filename` uses the keyword analyzer, so every chunk scores an
+identical 1.1211 and a constant offset cannot reorder anything. It is harmless
+by accident: analyze that field with `en` instead and the offset varies per
+document, silently perturbing the leg that is supposed to represent pure
+vector rank.
 """
 from .. import config
+from .. import trace
 from ..couchbase_io import query
 
 # Standard RRF constant. Large enough that the difference between ranks 1 and 2
@@ -96,11 +107,9 @@ def build_statement(question: str, embedding: list, doc_name: str = None,
         params["$filename"] = config.source_filename(doc_name)
         scope = '{"field": "xmeta-data.filename", "match": $filename}'
         lexical_query = f'{{"conjuncts": [{scope}, {lexical}]}}'
-        vector_query = scope
         knn_filter = f', "filter": {scope}'
     else:
         lexical_query = lexical
-        vector_query = '{"match_all": {}}'
         knn_filter = ""
 
     collection = f"`{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}`"
@@ -110,17 +119,17 @@ def build_statement(question: str, embedding: list, doc_name: str = None,
     knn = (f'"knn": [{{"field": "text-embedding", "vector": $query_vector, '
            f'"k": {knn_k}{knn_filter}}}]')
 
-    statement = f"""SELECT RAW lexical FROM (
-  {SELECT_FIELDS}, "lexical" AS leg
+    statement = f"""SELECT RAW bm25 FROM (
+  {SELECT_FIELDS}, "bm25" AS channel
   FROM {collection} AS d
   WHERE SEARCH(d, {{"query": {lexical_query}}}, {index})
   ORDER BY SEARCH_SCORE() DESC LIMIT {LEG_CANDIDATES}
-) AS lexical
+) AS bm25
 UNION ALL
 SELECT RAW vector FROM (
-  {SELECT_FIELDS}, "vector" AS leg
+  {SELECT_FIELDS}, "vector" AS channel
   FROM {collection} AS d
-  WHERE SEARCH(d, {{"query": {vector_query}, {knn}}}, {index})
+  WHERE SEARCH(d, {{{knn}}}, {index})
   ORDER BY SEARCH_SCORE() DESC LIMIT {LEG_CANDIDATES}
 ) AS vector"""
     return statement, params
@@ -158,37 +167,58 @@ def build_fused_statement(question: str, embedding: list, doc_name: str = None,
     return statement, params
 
 
-def rrf_merge(rows: list, top_k: int = config.TOP_K, k: int = RRF_K) -> list:
-    """Reciprocal rank fusion over the legs present in `rows`.
+def rrf_merge(rows: list, top_k: int = config.TOP_K, k: int = RRF_K,
+              weights: dict = None) -> list:
+    """Reciprocal rank fusion over the channels present in `rows`.
 
     Rank is derived here rather than trusted from row order: UNION ALL makes no
-    ordering guarantee across branches, so each leg is re-sorted by its own
-    score before ranking. Only ranks are compared, never scores from different
-    legs - that comparison is precisely what broke score fusion.
+    ordering guarantee across branches, so each channel is re-sorted by its own
+    score before ranking. Only ranks are compared, never raw scores from
+    different channels - that comparison is exactly what broke score fusion.
+
+    Each returned chunk carries the full arithmetic: per-channel rank, the raw
+    score it came from, and that channel's contribution. Retrieval ranking is
+    otherwise the least inspectable stage in the pipeline, and a fused number
+    with no derivation is not something anyone can check.
     """
-    legs = {}
+    weights = weights or {"bm25": config.RRF_BM25_WEIGHT,
+                          "vector": config.RRF_VECTOR_WEIGHT}
+    channels = {}
     for row in rows:
-        legs.setdefault(row.get("leg", "unknown"), []).append(row)
+        channels.setdefault(row.get("channel", "unknown"), []).append(row)
 
     fused = {}
-    for leg_rows in legs.values():
-        leg_rows.sort(key=lambda r: r.get("score") or 0, reverse=True)
-        for rank, row in enumerate(leg_rows, 1):
-            key = row.get("id")
-            entry = fused.setdefault(key, {"row": row, "rrf": 0.0, "legs": {}})
-            entry["rrf"] += 1.0 / (k + rank)
-            entry["legs"][row.get("leg")] = rank
+    for name, channel_rows in channels.items():
+        channel_rows.sort(key=lambda r: r.get("score") or 0, reverse=True)
+        weight = weights.get(name, 1.0)
+        for rank, row in enumerate(channel_rows, 1):
+            contribution = weight / (k + rank)
+            entry = fused.setdefault(row.get("id"),
+                                     {"row": row, "rrf_score": 0.0, "channels": {}})
+            entry["rrf_score"] += contribution
+            entry["channels"][name] = {
+                "rank": rank,
+                "raw_score": round(row.get("score") or 0.0, 6),
+                "contribution": round(contribution, 6),
+            }
 
-    ordered = sorted(fused.values(), key=lambda e: e["rrf"], reverse=True)
+    ordered = sorted(fused.values(), key=lambda e: e["rrf_score"], reverse=True)
     out = []
     for entry in ordered[:top_k]:
         chunk = dict(entry["row"])
-        chunk["rrf_score"] = round(entry["rrf"], 6)
-        chunk["leg_ranks"] = entry["legs"]
-        # `leg` on a fused chunk would name whichever branch happened to be
-        # read last, which is meaningless once both contributed.
-        chunk["leg"] = "+".join(sorted(entry["legs"]))
+        chunk["rrf_score"] = round(entry["rrf_score"], 6)
+        chunk["channels"] = entry["channels"]
+        # `channel` on a fused chunk would name whichever branch was read last,
+        # which is meaningless once both contributed.
+        chunk["channel"] = "+".join(sorted(entry["channels"]))
         out.append(chunk)
+
+    trace.add("rrf_fusion", rank_constant=k, weights=weights,
+              candidates=len(fused), returned=len(out),
+              ranking=[{"final_rank": i, "page": c.get("page"), "type": c.get("type"),
+                        "rrf_score": c["rrf_score"],
+                        "channels": {n: v["rank"] for n, v in c["channels"].items()}}
+                       for i, c in enumerate(out, 1)])
     return out
 
 

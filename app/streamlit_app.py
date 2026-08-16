@@ -603,14 +603,37 @@ def render_detail(run: dict):
     with tab_evidence:
         section("Retrieved evidence", f"{len(result['chunks'])} chunks, in answer order",
                 ":material/find_in_page:")
+        fused = [c for c in result["chunks"] if c.get("channels")]
+        if fused:
+            st.caption("Reciprocal rank fusion · a chunk both channels rank highly "
+                       "outranks one only a single channel found. Ranks are compared, "
+                       "never raw scores: BM25 and kNN are on different scales.")
+            st.dataframe([{
+                "Final": i, "Page": c.get("page"), "Type": c.get("type"),
+                "BM25 rank": (c["channels"].get("bm25") or {}).get("rank"),
+                "Vector rank": (c["channels"].get("vector") or {}).get("rank"),
+                "RRF score": c.get("rrf_score"),
+            } for i, c in enumerate(result["chunks"], 1)],
+                hide_index=True, width="stretch")
+
         for i, chunk in enumerate(result["chunks"], 1):
-            score = chunk.get("anchor_score")
-            source = f"anchor score {score}" if score is not None else "semantic retrieval"
+            channels = chunk.get("channels") or {}
+            if channels:
+                source = " + ".join(
+                    f"{name} rank {v['rank']} ({v['raw_score']:.4f})"
+                    for name, v in sorted(channels.items()))
+                source += f" → RRF {chunk.get('rrf_score')}"
+            else:
+                score = chunk.get("anchor_score")
+                source = (f"anchor score {score}" if score is not None
+                          else "semantic retrieval")
             with st.expander(
                 f"[{i}] Page {chunk.get('page')} · {chunk.get('type')} · {source}",
                 icon=":material/table_view:" if chunk.get("type") == "table"
                 else ":material/article:",
             ):
+                if channels:
+                    st.json(channels, expanded=True)
                 st.caption(f"Associated titles: {chunk.get('titles')}")
                 st.code(chunk.get("text") or "", wrap_lines=True)
 

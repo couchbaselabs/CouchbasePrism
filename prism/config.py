@@ -59,3 +59,8 @@ KNN_CANDIDATES = 200
 #         kept as a runnable fallback. It cannot surface a chunk the vector leg
 #         missed, however well it matches lexically - see hybrid_search.
 HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "rrf")
+# Per-channel RRF weights. Equal by default: an unequal weighting is a claim
+# that one channel is generally more trustworthy, which nothing measured here
+# supports. Exposed so it can be tested rather than argued about.
+RRF_BM25_WEIGHT = float(os.environ.get("PRISM_RRF_BM25_WEIGHT", 1.0))
+RRF_VECTOR_WEIGHT = float(os.environ.get("PRISM_RRF_VECTOR_WEIGHT", 1.0))
