@@ -13,6 +13,8 @@ import pathlib
 import sys
 import time
 
+from dataclasses import replace
+
 import altair as alt
 import pandas as pd
 import streamlit as st
@@ -90,6 +92,15 @@ PHASE_HELP = {
     "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
                 "with binding, deterministic calculation and governance",
 }
+FUSION_LABELS = {"score": "Couchbase native", "rrf": "Reciprocal rank fusion"}
+FUSION_HELP = {
+    "score": "One fused SEARCH(): the Search service sums the lexical and vector "
+             "scores and returns a single SEARCH_SCORE(). Nothing to tune - and no "
+             "way to see how much each channel contributed.",
+    "rrf": "Two SEARCH channels in one statement, merged in code by 1/(k + rank). "
+           "Measured recall@10 0.67 vs 0.54 over two runs, and every chunk carries "
+           "its per-channel rank, raw score and contribution.",
+}
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
 
@@ -133,12 +144,15 @@ def trace_stats(events: list) -> dict:
 
 
 def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
-            phase: str, model: str) -> dict:
+            phase: str, model: str, fusion: str = None) -> dict:
     started = time.perf_counter()
     with trace.capture() as events:
         result = runtime.answer_question(
             question["question"], company_catalog(catalog_docs, question["company"]),
-            dictionary_data, options=phases.get(phase), model=model)
+            dictionary_data,
+            options=replace(phases.get(phase), fusion=fusion) if fusion
+            else phases.get(phase),
+            model=model)
         verdict = judge.score(question["question"], question["expected_answer"],
                               result["answer"], model=model)
     stats = trace_stats(events)
@@ -603,16 +617,29 @@ def render_detail(run: dict):
     with tab_evidence:
         section("Retrieved evidence", f"{len(result['chunks'])} chunks, in answer order",
                 ":material/find_in_page:")
-        fused = [c for c in result["chunks"] if c.get("channels")]
-        if fused:
+        if any(c.get("channels") for c in result["chunks"]):
             st.caption("Reciprocal rank fusion · a chunk both channels rank highly "
                        "outranks one only a single channel found. Ranks are compared, "
-                       "never raw scores: BM25 and kNN are on different scales.")
+                       "never raw scores.")
             st.dataframe([{
                 "Final": i, "Page": c.get("page"), "Type": c.get("type"),
-                "BM25 rank": (c["channels"].get("bm25") or {}).get("rank"),
-                "Vector rank": (c["channels"].get("vector") or {}).get("rank"),
+                "BM25 rank": ((c.get("channels") or {}).get("bm25") or {}).get("rank"),
+                "Vector rank": ((c.get("channels") or {}).get("vector") or {}).get("rank"),
                 "RRF score": c.get("rrf_score"),
+            } for i, c in enumerate(result["chunks"], 1)],
+                hide_index=True, width="stretch")
+        elif any(c.get("score") is not None for c in result["chunks"]):
+            # Native fusion returns one blended number and no derivation:
+            # SEARCH_META exposes only id and score, and "explain": true adds
+            # nothing through N1QL. Showing the score without pretending it can
+            # be decomposed is the honest version - and the contrast with the
+            # RRF table above is the reason the switch is worth having.
+            st.caption("Couchbase native fusion · the Search service sums the lexical "
+                       "and vector contributions into one SEARCH_SCORE(). The split "
+                       "between them is not recoverable through N1QL.")
+            st.dataframe([{
+                "Final": i, "Page": c.get("page"), "Type": c.get("type"),
+                "SEARCH_SCORE()": round(c["score"], 6) if c.get("score") is not None else None,
             } for i, c in enumerate(result["chunks"], 1)],
                 hide_index=True, width="stretch")
 
@@ -623,6 +650,8 @@ def render_detail(run: dict):
                     f"{name} rank {v['rank']} ({v['raw_score']:.4f})"
                     for name, v in sorted(channels.items()))
                 source += f" → RRF {chunk.get('rrf_score')}"
+            elif chunk.get("score") is not None:
+                source = f"SEARCH_SCORE() {chunk['score']:.4f}"
             else:
                 score = chunk.get("anchor_score")
                 source = (f"anchor score {score}" if score is not None
@@ -682,6 +711,14 @@ with st.sidebar:
                          index=sorted(phases.PHASES).index(phases.DEFAULT_PHASE),
                          format_func=lambda p: phases.LABELS.get(p, p))
     st.caption(PHASE_HELP[phase])
+
+    if phases.get(phase).bm25:
+        fusion = st.segmented_control(
+            "Hybrid fusion", list(FUSION_LABELS), default="score", required=True,
+            width="stretch", format_func=lambda f: FUSION_LABELS[f])
+        st.caption(FUSION_HELP[fusion])
+    else:
+        fusion = None
 
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],
                                     default="OpenAI", required=True, width="stretch")
@@ -768,7 +805,8 @@ if run_clicked:
         for index, question in enumerate(targets, 1):
             status.write(f"{index}/{len(targets)} · {question['id']}")
             try:
-                runs.append(run_one(question, catalog_docs, dictionary_data, phase, model))
+                runs.append(run_one(question, catalog_docs, dictionary_data, phase,
+                                    model, fusion))
             except Exception as exc:
                 status.update(label=f"Run stopped: {exc}", state="error", expanded=True)
                 st.exception(exc)

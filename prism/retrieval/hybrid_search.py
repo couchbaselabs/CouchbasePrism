@@ -228,9 +228,10 @@ def rrf_merge(rows: list, top_k: int = config.TOP_K, k: int = RRF_K,
 def hybrid_search(question: str, embedding: list, doc_name: str = None,
                   anchors: list = None, top_k: int = config.TOP_K,
                   knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
-                  concept: str = None) -> list:
-    """One statement, two legs, merged by rank."""
-    if config.HYBRID_FUSION == "score":
+                  concept: str = None, fusion: str = None) -> list:
+    """One statement either way. Native fusion returns a single blended
+    SEARCH_SCORE(); RRF returns the per-channel derivation as well."""
+    if (fusion or config.HYBRID_FUSION) == "score":
         statement, params = build_fused_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
         return query(statement, params)

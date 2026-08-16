@@ -27,6 +27,7 @@ class PipelineOptions:
     bm25: bool = False            # hybrid BM25 + kNN via the Search Vector Index
     title_boost: float = 0.0      # boost associated-titles in BM25 (unreliable)
     governance: bool = True       # bind, compute, validate, consult the dictionary
+    fusion: str = None            # "score" (Couchbase native) or "rrf"; None = config
 
 
 def answer_question(question: str, catalog_docs: list, dictionary_data: dict = None,
@@ -42,7 +43,8 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     plan = retrieval.plan_evidence(question, model=model)
     chunks = retrieval.retrieve(question, plan, doc_name,
                                 use_anchors=options.anchors, use_bm25=options.bm25,
-                                title_boost=options.title_boost)
+                                title_boost=options.title_boost,
+                                fusion=options.fusion)
 
     kind = plan.get("answer_kind")
     entry = policy = None

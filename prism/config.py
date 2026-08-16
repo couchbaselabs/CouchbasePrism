@@ -55,11 +55,14 @@ VECTOR_N_PROBES = 16
 # normalised, so a higher boost LOWERS the result (0.7394 at boost 1 down to
 # 0.2731 at boost 1000).
 KNN_CANDIDATES = 200
-# "rrf"   two SEARCH legs unioned in one statement, merged by reciprocal rank.
-# "score" the original single fused SEARCH() with the kNN clause inside it,
-#         kept as a runnable fallback. It cannot surface a chunk the vector leg
-#         missed, however well it matches lexically - see hybrid_search.
-HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "rrf")
+# "score" Couchbase native hybrid: one fused SEARCH(), the Search service sums
+#         the lexical and vector scores. Default - nothing to tune, and one
+#         blended SEARCH_SCORE() per row.
+# "rrf"   two SEARCH channels unioned in one statement, merged in code by
+#         reciprocal rank. Measurably better recall (0.67 vs 0.54 at 10, over
+#         two runs) and it exposes each channel's contribution, at the cost of
+#         three knobs. See eval.compare_fusion.
+HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "score")
 # Per-channel RRF weights. Equal by default: an unequal weighting is a claim
 # that one channel is generally more trustworthy, which nothing measured here
 # supports. Exposed so it can be tested rather than argued about.
