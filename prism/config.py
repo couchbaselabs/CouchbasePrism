@@ -54,3 +54,8 @@ VECTOR_N_PROBES = 16
 # hit in the filing; at k=100 it ranked 7th. Boosting cannot substitute, as
 # scores are normalised and boosting lowers them.
 KNN_CANDIDATES = 200
+# "rrf"   two SEARCH legs unioned in one statement, merged by reciprocal rank.
+# "score" the original single fused SEARCH() with the kNN clause inside it,
+#         kept as a runnable fallback. It cannot surface a chunk the vector leg
+#         missed, however well it matches lexically - see hybrid_search.
+HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "rrf")

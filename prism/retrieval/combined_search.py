@@ -32,7 +32,8 @@ def combine(*chunk_lists, top_k: int = config.TOP_K) -> list:
 def retrieve(question: str, plan: dict, doc_name: str = None, *,
              use_anchors: bool = True, use_bm25: bool = False,
              title_boost: float = 0.0, top_k: int = config.TOP_K,
-             probe: bool = False, repair: bool = False) -> list:
+             probe: bool = False, repair: bool = False,
+             use_concept: bool = True) -> list:
     """Every configuration issues exactly ONE statement.
 
     `probe` and `repair` are diagnostics and both default OFF, because each
@@ -63,6 +64,7 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
         anchors = live
     if use_bm25:
         return hybrid_search(question, embedding, doc_name, anchors=anchors,
-                             top_k=top_k, title_boost=title_boost)
+                             top_k=top_k, title_boost=title_boost,
+                             concept=plan.get("concept") if use_concept else None)
     anchor_chunks = anchor_search(anchors, doc_name) if (anchors and doc_name) else []
     return combine(anchor_chunks, vector_search(embedding, doc_name, top_k), top_k=top_k)
