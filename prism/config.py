@@ -47,12 +47,13 @@ TOP_K = 10
 MAX_ANCHOR_CHUNKS = 6
 VECTOR_N_PROBES = 16
 # kNN candidate depth inside the hybrid SEARCH(). NOT a result count - it is
-# the pool the lexical leg is allowed to re-rank. Couchbase sums the two
-# scores, and a document outside the kNN candidates cannot be surfaced by BM25
-# no matter how well it matches: at k=50 the chunk holding 3M's FY2022
-# operating-margin table was unreachable despite being the single best lexical
-# hit in the filing; at k=100 it ranked 7th. Boosting cannot substitute, as
-# scores are normalised and boosting lowers them.
+# the pool the vector channel contributes. Couchbase unions the query and knn
+# hits and sums their scores, so a lexical-only document IS eligible; it simply
+# carries only its lexical score. Measured: 3M's FY2022 operating-margin table
+# is present at rank 136 with score 0.6695, below the rank-10 floor of 0.8696.
+# Outranked, not excluded. Boosting cannot rescue it either - scores are
+# normalised, so a higher boost LOWERS the result (0.7394 at boost 1 down to
+# 0.2731 at boost 1000).
 KNN_CANDIDATES = 200
 # "rrf"   two SEARCH legs unioned in one statement, merged by reciprocal rank.
 # "score" the original single fused SEARCH() with the kNN clause inside it,
@@ -64,3 +65,11 @@ HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "rrf")
 # supports. Exposed so it can be tested rather than argued about.
 RRF_BM25_WEIGHT = float(os.environ.get("PRISM_RRF_BM25_WEIGHT", 1.0))
 RRF_VECTOR_WEIGHT = float(os.environ.get("PRISM_RRF_VECTOR_WEIGHT", 1.0))
+# RRF rank constant. 60 is conventional. Measured over two independent runs of
+# eval.compare_fusion, k=1 is better on recall@5 (0.50 vs 0.38) and mean gold
+# rank (4.2 vs 5.0) while recall@10 is identical - so it reorders the evidence
+# set without changing its membership, and all TOP_K chunks reach the model
+# either way. Left at 60 because no end-to-end difference was measured; worth
+# revisiting if TOP_K shrinks or a reranker is added, where rank order starts
+# to matter.
+RRF_K = int(os.environ.get("PRISM_RRF_K", 60))

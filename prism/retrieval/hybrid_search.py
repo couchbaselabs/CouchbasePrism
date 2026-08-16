@@ -6,15 +6,20 @@ Two legs, unioned, then merged by rank rather than by score:
                   anchors as phrases, scoped to the resolved document
     vector leg    kNN over the same Search Vector Index, same scope
 
-**Why not one fused SEARCH() with a knn clause.** That was the original design
-and it could not retrieve a chunk that BM25 alone ranked first. Couchbase sums
-the lexical and vector scores, but only across documents already in the kNN
-candidate set, and the two scores are on different scales - kNN returns
-0.86-1.00 where BM25 returns 0.15-0.33. A chunk found only by the lexical leg
-therefore sorts below every vector hit and falls off the LIMIT. Measured on
-3M's FY2022 operating-margin table: rank 1 lexically, absent from the fused
-query at every candidate depth and every boost. Boosting makes it worse, since
-scores are normalised and a higher boost lowers the normalised result.
+**Why not one fused SEARCH() with a knn clause.** Couchbase unions the query
+and knn hits and sums their scores, so a lexical-only document is eligible -
+it simply carries only its lexical score. That score is not competitive: 3M's
+FY2022 operating-margin table, the best lexical hit in its filing, lands at
+rank 136 with 0.6695 against a rank-10 floor of 0.8696. It is outranked rather
+than excluded, and the effect is the same - the chunk never reaches the model.
+Boosting makes it worse, since scores are normalised and a higher boost lowers
+the result (0.7394 at boost 1, 0.2731 at boost 1000).
+
+Measured over two independent runs of eval.compare_fusion against
+FinanceBench's annotated evidence pages: recall@10 0.67 vs 0.54 for the fused
+query, gold evidence found for 6 of 8 questions vs 5, at equal latency. The
+whole difference is one question, so this is a modest and narrow result rather
+than a decisive one.
 
 `build_fused_statement` keeps that original shape as a live fallback - set
 config.HYBRID_FUSION = "score" to use it. It is kept as code rather than as a
@@ -50,9 +55,7 @@ from .. import config
 from .. import trace
 from ..couchbase_io import query
 
-# Standard RRF constant. Large enough that the difference between ranks 1 and 2
-# does not dominate, small enough that deep ranks still separate.
-RRF_K = 60
+RRF_K = config.RRF_K
 LEG_CANDIDATES = 20
 
 SELECT_FIELDS = """SELECT META(d).id AS id,
