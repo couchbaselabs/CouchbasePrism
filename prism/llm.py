@@ -33,6 +33,13 @@ def resolve_model(model, stage: str = None) -> str:
 # the older forms. A version table here would be wrong within a release or two.
 _REJECTED_PARAMS = {}
 
+# Reasoning tokens are billed against `max_completion_tokens`, so the old
+# `max_tokens` budget cannot be carried across untouched. gpt-5.5 spent all 500
+# of an answer budget on reasoning and returned empty content - a silent empty
+# answer that the evaluation judge scored as a failure, which looked exactly
+# like a model quality problem.
+REASONING_HEADROOM = 12
+
 
 def _adapt(body: dict) -> dict:
     """Rewrite a request for what this model is known to accept."""
@@ -40,8 +47,18 @@ def _adapt(body: dict) -> dict:
     if "temperature" in rejected:
         body.pop("temperature", None)
     if "max_tokens" in rejected and "max_tokens" in body:
-        body["max_completion_tokens"] = body.pop("max_tokens")
+        # Headroom, because the visible answer competes with reasoning for this
+        # budget rather than having its own.
+        body["max_completion_tokens"] = body.pop("max_tokens") * REASONING_HEADROOM
     return body
+
+
+def _starved(result: dict) -> bool:
+    """True when the model hit its completion ceiling with nothing to show for
+    it - the whole budget went to reasoning."""
+    choice = (result.get("choices") or [{}])[0]
+    return (choice.get("finish_reason") == "length"
+            and not (choice.get("message", {}).get("content") or "").strip())
 
 
 def _learn_rejection(resp) -> str:
@@ -81,6 +98,14 @@ def _post(body: dict, timeout: int, stage: str = None) -> dict:
                     continue
             resp.raise_for_status()
             result = resp.json()
+            if _starved(result) and body.get("max_completion_tokens"):
+                # Raise the ceiling rather than return an empty answer. Bounded,
+                # so a model that never emits content fails loudly instead of
+                # looping.
+                if body["max_completion_tokens"] < 32000:
+                    body = dict(body)
+                    body["max_completion_tokens"] *= 4
+                    continue
             content = result["choices"][0]["message"]["content"]
             trace.add("llm_call", stage=stage, endpoint=CHAT_URL, request=body,
                       response=content, usage=result.get("usage"),
