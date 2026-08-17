@@ -49,6 +49,11 @@ MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", OPENAI_MODEL)
 MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", OPENAI_MODEL)
 MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", OPENAI_MODEL)
 
+# Reasoning models are slow enough that the old 60-90s ceilings dropped whole
+# questions: one benchmark run lost a question to a 90s read timeout while the
+# model was still reasoning. Generous by default; a hung call still fails.
+LLM_TIMEOUT = int(os.environ.get("PRISM_LLM_TIMEOUT", 300))
+
 # Which role each traced stage belongs to. A stage missing here falls back to
 # the answer role, since an untagged call is more likely to be user-facing than
 # throwaway.

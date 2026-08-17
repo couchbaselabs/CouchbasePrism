@@ -68,7 +68,7 @@ def repair_anchors(question: str, dead: list, chunks: list, doc_name: str = None
     }, indent=1) + "\n\nEXCERPTS FROM THE DOCUMENT:\n" + _format_excerpts(chunks)
 
     try:
-        proposed = llm.chat_json(REPAIR_SYSTEM_PROMPT, user, model=model, timeout=60,
+        proposed = llm.chat_json(REPAIR_SYSTEM_PROMPT, user, model=model,
                                  stage="anchor_repair").get("anchors", [])
     except Exception:
         # A failed repair must not fail the question; the live anchors and the

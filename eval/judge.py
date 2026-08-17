@@ -57,7 +57,7 @@ def llm_judge(question: str, expected: str, answer: str, model: str = None) -> d
     return llm.chat_json(
         JUDGE_SYSTEM_PROMPT,
         f"QUESTION: {question}\n\nREFERENCE ANSWER: {expected}\n\nCANDIDATE ANSWER: {answer}",
-        model=model, timeout=60, stage="judge")
+        model=model, stage="judge")
 
 
 def score(question: str, expected: str, answer: str, model: str = None) -> dict:

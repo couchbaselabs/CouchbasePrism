@@ -118,7 +118,7 @@ def _post(body: dict, timeout: int, stage: str = None) -> dict:
             raise
 
 
-def chat_json(system: str, user: str, model=None, timeout: int = 90,
+def chat_json(system: str, user: str, model=None, timeout: int = None,
               stage: str = None) -> dict:
     """Structured call. Returns the parsed JSON object the model produced."""
     body = {
@@ -128,11 +128,11 @@ def chat_json(system: str, user: str, model=None, timeout: int = 90,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
     }
-    return json.loads(_post(body, timeout, stage)["choices"][0]["message"]["content"])
+    return json.loads(_post(body, timeout or config.LLM_TIMEOUT, stage)["choices"][0]["message"]["content"])
 
 
 def chat_text(prompt: str, model=None, max_tokens: int = 500,
-              timeout: int = 90, stage: str = None) -> str:
+              timeout: int = None, stage: str = None) -> str:
     """Free-text call, used only for answer synthesis."""
     body = {
         "model": resolve_model(model, stage),
@@ -140,4 +140,4 @@ def chat_text(prompt: str, model=None, max_tokens: int = 500,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
-    return _post(body, timeout, stage)["choices"][0]["message"]["content"]
+    return _post(body, timeout or config.LLM_TIMEOUT, stage)["choices"][0]["message"]["content"]

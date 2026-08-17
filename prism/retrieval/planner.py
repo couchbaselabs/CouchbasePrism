@@ -97,8 +97,7 @@ def plan_evidence(question: str, model=None, source_context: str = None) -> dict
     """
     user = (f"SOURCE CONTEXT: {source_context}\n\nQUERY: {question}"
             if source_context else question)
-    return llm.chat_json(PLANNER_SYSTEM_PROMPT, user, model=model, timeout=60,
-                         stage="planner")
+    return llm.chat_json(PLANNER_SYSTEM_PROMPT, user, model=model, stage="planner")
 
 
 def _as_fact(entry) -> dict:

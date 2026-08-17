@@ -135,8 +135,7 @@ def propose_candidates(concept: str, question: str, plan: dict,
             "answer_kind": plan.get("answer_kind"),
         },
     }, indent=1)
-    raw = llm.chat_json(CANDIDATE_SYSTEM_PROMPT, user, model=model, timeout=60,
-                        stage="candidate").get("candidates", [])
+    raw = llm.chat_json(CANDIDATE_SYSTEM_PROMPT, user, model=model, stage="candidate").get("candidates", [])
 
     accepted, rejected = [], []
     for candidate in raw:
