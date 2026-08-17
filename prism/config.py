@@ -32,7 +32,50 @@ def source_filename(doc_name: str) -> str:
 
 
 # --- Models ----------------------------------------------------------------
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
+
+# Model per ROLE, not per call site. Three roles, because the stages differ in
+# what they actually need:
+#
+#   planner   proposes structure it cannot verify - the evidence plan and the
+#             candidate calculation conventions. Reasoning quality matters,
+#             volume is one call each.
+#   answer    binding and synthesis, where an error is a wrong number in front
+#             of a reader. Binding is grouped here rather than with utility
+#             because picking the wrong column is not a tagging mistake.
+#   utility   classification, tagging and grading - catalog field extraction,
+#             the evaluation judge, anchor repair. Cheap and high volume.
+MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", OPENAI_MODEL)
+MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", OPENAI_MODEL)
+MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", OPENAI_MODEL)
+
+# Which role each traced stage belongs to. A stage missing here falls back to
+# the answer role, since an untagged call is more likely to be user-facing than
+# throwaway.
+STAGE_ROLE = {
+    "planner": "planner",
+    "candidate": "planner",
+    "binder": "answer",
+    "answer": "answer",
+    "judge": "utility",
+    "anchor_repair": "utility",
+    "catalog": "utility",
+}
+
+
+def model_for(stage: str = None) -> str:
+    return {"planner": MODEL_PLANNER, "answer": MODEL_ANSWER,
+            "utility": MODEL_UTILITY}[STAGE_ROLE.get(stage, "answer")]
+
+
+def stage_models(planner: str = None, answer: str = None,
+                 utility: str = None) -> dict:
+    """A per-stage mapping from three role choices, for callers that select
+    models at runtime (the UI) rather than from the environment."""
+    chosen = {"planner": planner or MODEL_PLANNER,
+              "answer": answer or MODEL_ANSWER,
+              "utility": utility or MODEL_UTILITY}
+    return {stage: chosen[role] for stage, role in STAGE_ROLE.items()}
 EMBED_ENDPOINT = os.environ.get("MODEL_END_POINT", "")
 EMBED_MODEL = os.environ.get("MODEL_ID", "")
 

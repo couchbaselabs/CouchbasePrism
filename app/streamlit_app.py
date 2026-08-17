@@ -85,7 +85,21 @@ st.html("""
   }
 </style>
 """)
-MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"]
+MODEL_OPTIONS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5",
+                 "gpt-4.1-mini", "gpt-4o-mini"]
+# Roles, not call sites - see prism.config.STAGE_ROLE. Binding sits with answer
+# rather than utility because choosing the wrong column is not a tagging error.
+MODEL_ROLES = [
+    ("planner", "Planner", "gpt-5.4-mini",
+     "Evidence plan and candidate calculation conventions - proposes structure "
+     "it cannot verify."),
+    ("answer", "Binding + answer", "gpt-5.5",
+     "Binds facts to rows and columns, then writes the answer. Errors here are "
+     "wrong numbers in front of a reader."),
+    ("utility", "Classification", "gpt-5.4-nano",
+     "Catalog field extraction, the evaluation judge, anchor repair. Cheap and "
+     "high volume."),
+]
 PHASE_HELP = {
     "1-vector": "Textbook RAG · kNN across the whole corpus, no scoping",
     "2-catalog": "Adds catalog-resolved document scoping before similarity",
@@ -723,9 +737,13 @@ with st.sidebar:
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],
                                     default="OpenAI", required=True, width="stretch")
     if provider == "OpenAI":
-        default_model = config.OPENAI_MODEL if config.OPENAI_MODEL in MODEL_OPTIONS else MODEL_OPTIONS[0]
-        model = st.selectbox("Model", MODEL_OPTIONS,
-                             index=MODEL_OPTIONS.index(default_model), accept_new_options=True)
+        picked = {}
+        for role, label, default, help_text in MODEL_ROLES:
+            picked[role] = st.selectbox(
+                label, MODEL_OPTIONS,
+                index=MODEL_OPTIONS.index(default) if default in MODEL_OPTIONS else 0,
+                accept_new_options=True, help=help_text, key=f"model_{role}")
+        model = config.stage_models(**picked)
     else:
         st.info("Bedrock adapter is the next provider integration.",
                 icon=":material/upcoming:")

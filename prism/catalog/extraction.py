@@ -74,7 +74,8 @@ def apply_grounding_check(extraction: dict, text: str) -> dict:
 
 def classify_cover(text: str, model: str = None) -> dict:
     return apply_grounding_check(
-        llm.chat_json(CLASSIFY_SYSTEM_PROMPT, text[:10000], model=model), text)
+        llm.chat_json(CLASSIFY_SYSTEM_PROMPT, text[:10000], model=model,
+                      stage="catalog"), text)
 
 
 def year_of(date_str: str):

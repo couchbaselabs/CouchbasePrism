@@ -83,9 +83,22 @@ GUIDELINES:
 """
 
 
-def plan_evidence(question: str, model: str = None) -> dict:
-    return llm.chat_json(PLANNER_SYSTEM_PROMPT, question, model=model, timeout=60,
-                          stage="planner")
+def plan_evidence(question: str, model=None, source_context: str = None) -> dict:
+    """`source_context` describes the resolved document in the corpus's own
+    terms - its type and period, taken from the catalog. The prompt template
+    stays domain-free; the domain-specific value arrives as data.
+
+    Worth knowing before tuning this: on gpt-4o-mini it measurably HURT.
+    Over 24 plans, dead anchors rose from 62% to 66% and it degraded a question
+    that had been passing. The model already infers the genre from the question
+    wording; what it cannot infer is which strings the document prints. Kept
+    because a stronger model may use it differently, and because it is now
+    measurable per model rather than assumed either way.
+    """
+    user = (f"SOURCE CONTEXT: {source_context}\n\nQUERY: {question}"
+            if source_context else question)
+    return llm.chat_json(PLANNER_SYSTEM_PROMPT, user, model=model, timeout=60,
+                         stage="planner")
 
 
 def _as_fact(entry) -> dict:

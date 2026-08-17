@@ -19,6 +19,20 @@ from .fact_binding import bind_facts, grounded_facts, to_identifier, validate_bi
 from .validation import validate_conclusion
 
 
+def describe_source(entry: dict) -> str:
+    """One line naming the resolved document in its own terms. Returns None when
+    the catalog has nothing useful, so a missing field degrades to no context
+    rather than to a sentence with a hole in it."""
+    if not entry:
+        return None
+    parts = [p for p in (entry.get("doc_type"), entry.get("company")) if p]
+    if not parts:
+        return None
+    described = " for ".join(parts)
+    period = entry.get("doc_period")
+    return f"the source is a {described}" + (f", period {period}." if period else ".")
+
+
 @dataclass(frozen=True)
 class PipelineOptions:
     """Which capabilities are active. Defaults are the full runtime."""
@@ -28,6 +42,7 @@ class PipelineOptions:
     title_boost: float = 0.0      # boost associated-titles in BM25 (unreliable)
     governance: bool = True       # bind, compute, validate, consult the dictionary
     fusion: str = None            # "score" (Couchbase native) or "rrf"; None = config
+    source_context: bool = True   # tell the planner the resolved doc type/period
 
 
 def answer_question(question: str, catalog_docs: list, dictionary_data: dict = None,
@@ -40,7 +55,11 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
 
     doc_name = (catalog.resolve_for_question(catalog_docs, question)
                 if options.catalog_filter else None)
-    plan = retrieval.plan_evidence(question, model=model)
+    # Built from the catalog, so the prompt stays generic and the corpus
+    # supplies the specifics.
+    entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)
+    context = describe_source(entry) if options.source_context else None
+    plan = retrieval.plan_evidence(question, model=model, source_context=context)
     chunks = retrieval.retrieve(question, plan, doc_name,
                                 use_anchors=options.anchors, use_bm25=options.bm25,
                                 title_boost=options.title_boost,
@@ -79,6 +98,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
 
     return {
         "question": question,
+        "source_context": context,
         "options": options,
         "resolved_doc": doc_name,
         "plan": plan,
