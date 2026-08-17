@@ -43,11 +43,17 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 #   answer    binding and synthesis, where an error is a wrong number in front
 #             of a reader. Binding is grouped here rather than with utility
 #             because picking the wrong column is not a tagging mistake.
-#   utility   classification, tagging and grading - catalog field extraction,
-#             the evaluation judge, anchor repair. Cheap and high volume.
+#   utility   classification and tagging - catalog field extraction, anchor
+#             repair. Cheap and high volume.
+#   judge      evaluation only, never part of an answer path. Defaults to the
+#             answer model because grading is NOT a tagging task: on gpt-5.4-nano
+#             the judge marked a verified-correct answer as a failure, and a
+#             stronger judge on the same recorded answers scored 5/8 rather than
+#             4/8. A weak grader silently understates the system.
 MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", OPENAI_MODEL)
 MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", OPENAI_MODEL)
 MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", OPENAI_MODEL)
+MODEL_JUDGE = os.environ.get("PRISM_MODEL_JUDGE", MODEL_ANSWER)
 
 # Reasoning models are slow enough that the old 60-90s ceilings dropped whole
 # questions: one benchmark run lost a question to a 90s read timeout while the
@@ -62,7 +68,7 @@ STAGE_ROLE = {
     "candidate": "planner",
     "binder": "answer",
     "answer": "answer",
-    "judge": "utility",
+    "judge": "judge",
     "anchor_repair": "utility",
     "catalog": "utility",
 }
@@ -70,16 +76,20 @@ STAGE_ROLE = {
 
 def model_for(stage: str = None) -> str:
     return {"planner": MODEL_PLANNER, "answer": MODEL_ANSWER,
-            "utility": MODEL_UTILITY}[STAGE_ROLE.get(stage, "answer")]
+            "utility": MODEL_UTILITY,
+            "judge": MODEL_JUDGE}[STAGE_ROLE.get(stage, "answer")]
 
 
 def stage_models(planner: str = None, answer: str = None,
-                 utility: str = None) -> dict:
-    """A per-stage mapping from three role choices, for callers that select
-    models at runtime (the UI) rather than from the environment."""
+                 utility: str = None, judge: str = None) -> dict:
+    """A per-stage mapping from role choices, for callers that select models at
+    runtime (the UI) rather than from the environment. The judge follows the
+    answer model unless overridden - it must not be the weakest model in the
+    run, or it understates everything else."""
     chosen = {"planner": planner or MODEL_PLANNER,
               "answer": answer or MODEL_ANSWER,
-              "utility": utility or MODEL_UTILITY}
+              "utility": utility or MODEL_UTILITY,
+              "judge": judge or answer or MODEL_JUDGE}
     return {stage: chosen[role] for stage, role in STAGE_ROLE.items()}
 EMBED_ENDPOINT = os.environ.get("MODEL_END_POINT", "")
 EMBED_MODEL = os.environ.get("MODEL_ID", "")
