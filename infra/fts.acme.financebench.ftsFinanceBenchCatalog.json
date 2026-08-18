@@ -1,0 +1,99 @@
+{
+  "type": "fulltext-index",
+  "name": "acme.financebench.ftsFinanceBenchCatalog",
+  "sourceType": "gocbcore",
+  "sourceName": "acme",
+  "planParams": {
+    "maxPartitionsPerPIndex": 128,
+    "indexPartitions": 1,
+    "numReplicas": 1
+  },
+  "params": {
+    "doc_config": {
+      "docid_prefix_delim": "",
+      "docid_regexp": "",
+      "mode": "scope.collection.type_field",
+      "type_field": "type"
+    },
+    "mapping": {
+      "analysis": {},
+      "default_analyzer": "standard",
+      "default_datetime_parser": "dateTimeOptional",
+      "default_field": "_all",
+      "default_mapping": {
+        "dynamic": false,
+        "enabled": false
+      },
+      "default_type": "_default",
+      "docvalues_dynamic": false,
+      "index_dynamic": true,
+      "store_dynamic": false,
+      "type_field": "_type",
+      "types": {
+        "financebench.catalog": {
+          "dynamic": false,
+          "enabled": true,
+          "properties": {
+            "company": {
+              "dynamic": false,
+              "enabled": true,
+              "properties": {
+                "value": {
+                  "dynamic": false,
+                  "enabled": true,
+                  "fields": [
+                    {
+                      "analyzer": "en",
+                      "index": true,
+                      "name": "value",
+                      "type": "text"
+                    }
+                  ]
+                }
+              }
+            },
+            "doc_name": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "keyword",
+                  "index": true,
+                  "name": "doc_name",
+                  "type": "text"
+                }
+              ]
+            },
+            "doc_period": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "index": true,
+                  "name": "doc_period",
+                  "type": "number"
+                }
+              ]
+            },
+            "period_end_date_iso": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "index": true,
+                  "name": "period_end_date_iso",
+                  "type": "datetime"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "store": {
+      "indexType": "scorch",
+      "segmentVersion": 16
+    }
+  },
+  "sourceParams": {}
+}

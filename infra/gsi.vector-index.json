@@ -1,0 +1,34 @@
+[
+  {
+    "bucket_id": "acme",
+    "datastore_id": "http://127.0.0.1:8091",
+    "id": "8253206f21fc021",
+    "index_key": [
+      "`text-embedding` VECTOR"
+    ],
+    "keyspace_id": "docs",
+    "metadata": {
+      "definition": "CREATE VECTOR INDEX `hyperscale_prasad_prism_text-embedding` ON `acme`.`financebench`.`docs`(`text-embedding` VECTOR) WITH {  \"defer_build\":true, \"num_replica\":1, \"dimension\":2048, \"similarity\":\"L2\", \"description\":\"IVF,SQ8\", \"scan_nprobes\":9 }",
+      "last_scan_time": "2026-08-15T22:56:31.476Z",
+      "num_replica": 1,
+      "stats": {
+        "last_known_scan_time": 1786834591476896512
+      }
+    },
+    "name": "hyperscale_prasad_prism_text-embedding",
+    "namespace": "default",
+    "namespace_id": "default",
+    "scope_id": "financebench",
+    "state": "online",
+    "using": "gsi",
+    "with": {
+      "description": "IVF,SQ8",
+      "dimension": 2048,
+      "num_partition": 1,
+      "num_replica": 1,
+      "retain_deleted_xattr": false,
+      "scan_nprobes": 9,
+      "similarity": "l2"
+    }
+  }
+]
