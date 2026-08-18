@@ -36,3 +36,7 @@ out/
 # docling-serve exports used for one-off diagnosis (12MB+)
 file.json
 file.md
+
+# Internal Couchbase documents pulled for reference. Never commit these.
+# The directory name is deliberately generic so no title leaks into git history.
+internal/
