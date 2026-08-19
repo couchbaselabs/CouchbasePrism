@@ -71,6 +71,11 @@ GUIDELINES:
   movement the source uses to explain the change, not inputs to a formula.
 - Do not speculate about alternative calculation conventions. A later
   calculation-planning stage may add further required facts.
+- A required fact must be a single value the source prints on one line. If
+  naming it would require combining, netting, or excluding other values, it is
+  not a fact - list the printed components instead. Widely used analytical
+  aggregates are still aggregates: they have names because analysts compute
+  them, not because sources print them.
 - Fact IDs must be unique snake_case identifiers that name only the quantity.
 - Do not include the subject, entity, date, period, or version in a fact ID.
   Those dimensions are resolved separately when the value is located.

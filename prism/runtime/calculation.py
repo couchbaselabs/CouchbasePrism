@@ -74,6 +74,11 @@ GUIDELINES:
 - If no calculation applies, return an empty `candidates` array.
 - Every identifier in a formula must appear in that candidate's
   `required_facts`.
+- Every required fact must be a single value the source prints. If a term in
+  your formula would itself have to be computed from other printed values,
+  expand it into those values rather than naming the aggregate. A term that
+  cannot be read directly off the source can never be bound, and the whole
+  candidate then evaluates to nothing.
 - Formulas may use only required-fact identifiers, numeric constants,
   parentheses, and the operators +, -, *, and /.
 - Do not use function calls or identifiers containing spaces.
