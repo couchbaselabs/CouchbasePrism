@@ -10,6 +10,7 @@ The app deliberately calls ``prism.runtime.answer_question`` and
 import html
 import json
 import pathlib
+import re
 import sys
 import time
 
@@ -211,6 +212,21 @@ def llm_role(event: dict) -> str:
     return "answer"
 
 
+def condense_excerpts(text: str) -> str:
+    """Replace each excerpt body with a size marker, keeping the page and title
+    headers. The answer prompt carries ten chunks of full document text, which
+    buries the instructions being inspected - and the bodies are already
+    readable, per chunk, on the Evidence tab.
+
+    Display only. The prompt sent to the model is untouched: dropping the
+    excerpt bodies from the real request would leave nothing to answer from.
+    """
+    def shrink(match):
+        return f"{match.group(1)}<{len(match.group(2)):,} chars - see Evidence tab>"
+    return re.sub(r"(\bContent: )(.*?)(?=\n\n---\n\n|\n\nQUESTION:|\Z)",
+                  shrink, text, flags=re.S)
+
+
 def show_llm_exchange(event: dict, label: str):
     """The prompt is the interesting part of an LLM call, so it is rendered as
     readable text. Collapsed JSON technically contained it, but as one escaped
@@ -223,11 +239,20 @@ def show_llm_exchange(event: dict, label: str):
                f"{usage.get('total_tokens', '—')} tokens · {elapsed:,.0f} ms")
     prompt_tab, response_tab, raw_tab = st.tabs(["Prompt", "Response", "Raw request"])
     with prompt_tab:
+        st.caption("Excerpt bodies are elided here - the full text of every "
+                   "retrieved chunk is on the Evidence tab. Raw request has the "
+                   "prompt exactly as sent.")
         for message in request.get("messages") or []:
             st.markdown(f"**{message.get('role', 'message')}**")
-            st.code(str(message.get("content", "")), wrap_lines=True)
+            st.code(condense_excerpts(str(message.get("content", ""))),
+                    wrap_lines=True)
     with response_tab:
-        st.code(event.get("response") or event.get("error") or "", wrap_lines=True)
+        raw = event.get("response") or event.get("error") or ""
+        try:
+            st.json(json.loads(raw), expanded=True)
+        except (ValueError, TypeError):
+            # Answer synthesis returns prose, not JSON.
+            st.code(raw, wrap_lines=True)
     with raw_tab:
         st.json(request, expanded=False)
 
@@ -254,10 +279,52 @@ def sql_kind(event: dict) -> str:
     return "SQL++"
 
 
+PARAM_TOKEN = re.compile(r"\$[a-zA-Z_][a-zA-Z_0-9]*")
+
+
+def pretty_sql(statement: str) -> str:
+    """Expand the JSON objects embedded in SEARCH() so the query object is
+    readable. Everything hard about these statements is WHERE the predicates
+    land, and that is invisible when the whole search object is one long line.
+
+    Named parameters are not valid JSON, so they are quoted before parsing and
+    unquoted afterwards.
+    """
+    out, i = [], 0
+    while i < len(statement):
+        ch = statement[i]
+        if ch == "{":
+            depth, j = 0, i
+            while j < len(statement):
+                if statement[j] == "{":
+                    depth += 1
+                elif statement[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            blob = statement[i:j + 1]
+            quoted = PARAM_TOKEN.sub(lambda m: f'"{m.group(0)}"', blob)
+            try:
+                parsed = json.loads(quoted)
+            except ValueError:
+                out.append(blob)
+            else:
+                # Unquote the parameters again so the statement reads as SQL++.
+                out.append(re.sub(r'"(\$[a-zA-Z_][a-zA-Z_0-9]*)"', r"\1",
+                                  json.dumps(parsed, indent=2)))
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    text = "".join(out)
+    return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
+
+
 def show_sql(event: dict, label: str):
     elapsed = event.get("elapsed_ms", 0)
     st.caption(f"{label} · {event.get('row_count', 0)} rows · {elapsed:,.0f} ms")
-    st.code(event.get("statement", ""), language="sql", wrap_lines=True)
+    st.code(pretty_sql(event.get("statement", "")), language="sql", wrap_lines=True)
     with st.popover("Parameters and query metrics", icon=":material/query_stats:"):
         st.markdown("**Parameters**")
         st.json(event.get("params") or {}, expanded=True)

@@ -20,17 +20,31 @@ from .validation import validate_conclusion
 
 
 def describe_source(entry: dict) -> str:
-    """One line naming the resolved document in its own terms. Returns None when
-    the catalog has nothing useful, so a missing field degrades to no context
-    rather than to a sentence with a hole in it."""
+    """One line naming the resolved document in its own terms.
+
+    Every field is optional and a missing one is simply left out, so this
+    degrades to less context rather than to a sentence with a hole in it. The
+    form is normalised for the prompt ("10-K", not "FORM 10-K") even though the
+    catalog stores what was printed - the prompt wants the concept, not the
+    evidence.
+
+    `gics_sector` is here because vocabulary is sector-specific in a way genre
+    alone does not capture: a Financials filing has no cost of goods sold, and a
+    planner that knows the sector can stop proposing labels that cannot exist.
+    """
     if not entry:
         return None
-    parts = [p for p in (entry.get("doc_type"), entry.get("company")) if p]
-    if not parts:
-        return None
-    described = " for ".join(parts)
-    period = entry.get("doc_period")
-    return f"the source is a {described}" + (f", period {period}." if period else ".")
+    form = catalog.form_of(entry.get("doc_type")) or entry.get("doc_type")
+    bits = []
+    if form:
+        bits.append(f"a {form}")
+    if entry.get("company"):
+        bits.append(f"for {entry['company']}")
+    if entry.get("gics_sector"):
+        bits.append(f"in the {entry['gics_sector']} sector")
+    if entry.get("doc_period"):
+        bits.append(f"covering period {entry['doc_period']}")
+    return ("the source is " + " ".join(bits) + ".") if bits else None
 
 
 @dataclass(frozen=True)
