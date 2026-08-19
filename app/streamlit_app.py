@@ -107,14 +107,23 @@ PHASE_HELP = {
     "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
                 "with binding, deterministic calculation and governance",
 }
-FUSION_LABELS = {"score": "Couchbase native", "rrf": "Reciprocal rank fusion"}
+FUSION_LABELS = {"score": "Sum (no fusion)", "native-rrf": "Native RRF",
+                 "native-rsf": "Native RSF", "native-dbsf": "Native DBSF",
+                 "rrf": "RRF in code"}
 FUSION_HELP = {
-    "score": "One fused SEARCH(): the Search service sums the lexical and vector "
-             "scores and returns a single SEARCH_SCORE(). Nothing to tune - and no "
-             "way to see how much each channel contributed.",
-    "rrf": "Two SEARCH channels in one statement, merged in code by 1/(k + rank). "
-           "Measured recall@10 0.67 vs 0.54 over two runs, and every chunk carries "
-           "its per-channel rank, raw score and contribution.",
+    "score": "One SEARCH(), no fusion strategy: the Search service SUMS the lexical "
+             "and vector scores. Nothing to tune, but the two scores are on "
+             "different footings, so a lexical-only hit loses to every vector hit.",
+    "native-rrf": "Server-side reciprocal rank fusion, 1/(k + rank), one SEARCH(). "
+                  "Needs Couchbase 8.1 - on 8.0.1 the score field parsed and was "
+                  "silently ignored. Channel weights come from each query's boost.",
+    "native-rsf": "Server-side relative score fusion: normalise each channel's "
+                  "scores into a common range, then combine.",
+    "native-dbsf": "Server-side distribution-based score fusion: normalise using "
+                   "each channel's score distribution rather than its range.",
+    "rrf": "Two SEARCH channels unioned in one statement, fused in application "
+           "code. Works on any version, and the only option that reports each "
+           "channel's rank and contribution per chunk.",
 }
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"

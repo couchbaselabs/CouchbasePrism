@@ -29,7 +29,7 @@ Return ONLY one valid JSON object:
 
 {
   "concept": "<canonical name of the requested concept>",
-  "answer_kind": "<exactly one of: stated_fact, derived_metric, judgment>",
+  "answer_kind": "<exactly one of: stated_fact, derived_metric, judgment, attribution>",
   "required_facts": [
     {
       "id": "<snake_case identifier>",
@@ -56,11 +56,19 @@ GUIDELINES:
 - Use `stated_fact` when the answer should be present directly in the source.
 - Use `derived_metric` when source values must be combined or transformed.
 - Use `judgment` when the question asks for an assessment, classification,
-  sufficiency determination, or threshold-based conclusion.
+  sufficiency determination, or threshold-based conclusion about a value.
+- Use `attribution` when the question asks what caused, drove, or explains
+  something, and the source is expected to state that explanation itself rather
+  than requiring it to be derived. Choose `attribution` over `judgment` when the
+  answer is an explanation to be reported, not a value to be assessed. A
+  question may ask for an explanation and also ask whether a measure is
+  meaningful; that is still `attribution`.
 - Include only facts reasonably necessary to answer the question.
 - When the answer must be derived or assessed, list the source quantities you
   can confidently identify as direct inputs. Do not list the derived quantity
   itself as a required fact.
+- For `attribution`, the required facts are the components or line items whose
+  movement the source uses to explain the change, not inputs to a formula.
 - Do not speculate about alternative calculation conventions. A later
   calculation-planning stage may add further required facts.
 - Fact IDs must be unique snake_case identifiers that name only the quantity.

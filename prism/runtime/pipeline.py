@@ -89,6 +89,11 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         entry = dictionary.find_metric(dictionary_data, plan.get("concept", ""))
         policy = dictionary.find_policy(dictionary_data, entry["id"]) if entry else None
 
+        # `attribution` is deliberately absent: the source states the
+        # explanation, so there is nothing to compute. Including it cost 118 of
+        # 160 seconds on one question - candidate proposal and fact binding both
+        # ran, both produced nothing, and the trace showed two large confident
+        # stages that contributed no part of the answer.
         if kind in ("derived_metric", "judgment"):
             planned = [to_identifier(f) for f in retrieval.fact_ids(plan)]
             if entry:
@@ -113,6 +118,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     return {
         "question": question,
         "source_context": context,
+        "computation_skipped": kind == "attribution",
         "options": options,
         "resolved_doc": doc_name,
         "plan": plan,

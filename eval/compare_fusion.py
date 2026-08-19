@@ -27,21 +27,19 @@ import statistics
 import time
 
 from prism import catalog, config
-from prism.couchbase_io import query
 from prism.retrieval import embed, plan_anchors, plan_evidence
-from prism.retrieval.hybrid_search import (
-    build_fused_statement, build_statement, rrf_merge,
-)
+from prism.retrieval.hybrid_search import hybrid_search
 
 GOLD = pathlib.Path("financebench/data/financebench_open_source.jsonl")
 
 CONFIGS = [
-    ("A native fused SEARCH_SCORE", {"mode": "fused"}),
-    ("B RRF k=60 equal",            {"mode": "rrf", "k": 60}),
-    ("C RRF k=10 equal",            {"mode": "rrf", "k": 10}),
-    ("D RRF k=1  equal",            {"mode": "rrf", "k": 1}),
-    ("E RRF k=60 bm25 x2",          {"mode": "rrf", "k": 60,
-                                     "weights": {"bm25": 2.0, "vector": 1.0}}),
+    ("A sum, no fusion",          {"fusion": "score"}),
+    ("B native RRF",              {"fusion": "native-rrf"}),
+    ("C native RSF",              {"fusion": "native-rsf"}),
+    ("D native DBSF",             {"fusion": "native-dbsf"}),
+    ("E RRF in code",             {"fusion": "rrf"}),
+    ("F native RRF, bm25 x3",     {"fusion": "native-rrf",
+                                   "weights": {"bm25": 3.0, "vector": 1.0}}),
 ]
 
 
@@ -61,16 +59,12 @@ def gold_questions(company: str) -> list:
 
 def run_config(spec: dict, question: str, embedding: list, doc_name: str,
                anchors: list, concept: str) -> tuple:
+    """Goes through hybrid_search rather than reaching for the builders, so what
+    is measured is the path the runtime actually takes."""
     started = time.perf_counter()
-    if spec["mode"] == "fused":
-        statement, params = build_fused_statement(
-            question, embedding, doc_name, anchors, concept=concept)
-        chunks = query(statement, params)
-    else:
-        statement, params = build_statement(
-            question, embedding, doc_name, anchors, concept=concept)
-        chunks = rrf_merge(query(statement, params), top_k=config.TOP_K,
-                           k=spec.get("k", 60), weights=spec.get("weights"))
+    chunks = hybrid_search(question, embedding, doc_name, anchors=anchors,
+                           concept=concept, fusion=spec["fusion"],
+                           weights=spec.get("weights"))
     return chunks, round((time.perf_counter() - started) * 1000, 1)
 
 
@@ -86,10 +80,20 @@ def score_chunks(chunks: list, gold_pages: set) -> dict:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--company", default="3M")
+    parser.add_argument("--company", default=None)
+    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     questions = gold_questions(args.company)
+    # Only questions whose document actually has chunks; a missing document is
+    # an ingestion gap, not a retrieval result.
+    ingested = catalog.ingested_doc_names()
+    dropped = [q["id"] for q in questions if q["doc_name"] not in ingested]
+    questions = [q for q in questions if q["doc_name"] in ingested]
+    if args.limit:
+        questions = questions[:args.limit]
+    if dropped:
+        print(f"skipped {len(dropped)} question(s) whose document was not ingested")
     catalog_docs = catalog.load_all()
     print(f"{len(questions)} questions with annotated evidence pages\n")
 

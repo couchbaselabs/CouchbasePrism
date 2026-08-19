@@ -113,14 +113,25 @@ VECTOR_N_PROBES = 16
 # normalised, so a higher boost LOWERS the result (0.7394 at boost 1 down to
 # 0.2731 at boost 1000).
 KNN_CANDIDATES = 200
-# "score" Couchbase native hybrid: one fused SEARCH(), the Search service sums
-#         the lexical and vector scores. Default - nothing to tune, and one
-#         blended SEARCH_SCORE() per row.
-# "rrf"   two SEARCH channels unioned in one statement, merged in code by
-#         reciprocal rank. Measurably better recall (0.67 vs 0.54 at 10, over
-#         two runs) and it exposes each channel's contribution, at the cost of
-#         three knobs. See eval.compare_fusion.
+# "score"       Couchbase native, no fusion strategy: one SEARCH(), the Search
+#               service SUMS the lexical and vector scores. Simple, but the two
+#               scores are on different footings and a lexical-only hit is
+#               outranked by every vector hit.
+# "native-rrf"  Couchbase native reciprocal rank fusion, server-side, one
+#               statement. Requires 8.1 (or the 8.0/7.6 backport). On 8.0.1 the
+#               `score` field PARSED AND WAS IGNORED, which looks exactly like
+#               success - verify with the checks in infra/README.md.
+# "native-rsf"  Native relative score fusion.
+# "native-dbsf" Native distribution-based score fusion.
+# "rrf"         Our own: two SEARCH channels unioned in one statement, merged in
+#               code. Kept because it works on any version and because it
+#               reports each channel's rank and contribution per chunk.
 HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "score")
+NATIVE_STRATEGIES = {"native-rrf": "rrf", "native-rsf": "rsf", "native-dbsf": "dbsf"}
+# Native equivalents of RRF_K and LEG_CANDIDATES. score_window_size must be >=
+# the requested size, and is the per-channel result set fusion considers.
+NATIVE_RANK_CONSTANT = int(os.environ.get("PRISM_NATIVE_RANK_CONSTANT", 60))
+NATIVE_WINDOW_SIZE = int(os.environ.get("PRISM_NATIVE_WINDOW_SIZE", 150))
 # Per-channel RRF weights. Equal by default: an unequal weighting is a claim
 # that one channel is generally more trustworthy, which nothing measured here
 # supports. Exposed so it can be tested rather than argued about.

@@ -170,6 +170,53 @@ def build_fused_statement(question: str, embedding: list, doc_name: str = None,
     return statement, params
 
 
+def build_native_statement(question: str, embedding: list, doc_name: str = None,
+                          anchors: list = None, top_k: int = config.TOP_K,
+                          knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
+                          concept: str = None, strategy: str = "rrf",
+                          weights: dict = None) -> tuple:
+    """One SEARCH() with the Search service doing the fusion.
+
+    Weights are expressed as each query's TOP-LEVEL boost, which is how the
+    server reads channel importance - verified: a lexical boost of 5 multiplies
+    that channel's contribution by 5 (5/61 = 0.08197 at rank 1).
+    """
+    weights = weights or {}
+    params = {"$query_vector": embedding}
+    lexical = _lexical_clause(question, anchors, concept, title_boost, params)
+
+    knn_filter = ""
+    if doc_name:
+        params["$filename"] = config.source_filename(doc_name)
+        scope = '{"field": "xmeta-data.filename", "match": $filename}'
+        query_clause = f'{{"conjuncts": [{scope}, {lexical}]'
+        knn_filter = f', "filter": {scope}'
+    else:
+        query_clause = lexical[:-1] if lexical.endswith("}") else lexical
+        query_clause = '{"disjuncts": [' + lexical.split('[', 1)[1].rsplit(']', 1)[0] + ']'
+    bm25_weight = weights.get("bm25")
+    query_clause += (f', "boost": {bm25_weight}}}' if bm25_weight is not None else "}")
+
+    vector_weight = weights.get("vector")
+    knn = (f'"knn": [{{"field": "text-embedding", "vector": $query_vector, '
+           f'"k": {knn_k}{knn_filter}'
+           + (f', "boost": {vector_weight}' if vector_weight is not None else "")
+           + "}]")
+
+    statement = (
+        SELECT_FIELDS + "\n"
+        + f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d\n"
+        + "WHERE SEARCH(d, {"
+        + f'"score": "{strategy}", '
+        + f'"params": {{"score_rank_constant": {config.NATIVE_RANK_CONSTANT}, '
+          f'"score_window_size": {max(config.NATIVE_WINDOW_SIZE, top_k)}}}, '
+        + f'"query": {query_clause}, {knn}, "size": {top_k}'
+        + f'}}, {{"index": "{config.FTS_DOCS_INDEX}"}})\n'
+        + f"ORDER BY SEARCH_SCORE() DESC LIMIT {top_k}"
+    )
+    return statement, params
+
+
 def rrf_merge(rows: list, top_k: int = config.TOP_K, k: int = RRF_K,
               weights: dict = None) -> list:
     """Reciprocal rank fusion over the channels present in `rows`.
@@ -228,14 +275,21 @@ def rrf_merge(rows: list, top_k: int = config.TOP_K, k: int = RRF_K,
 def hybrid_search(question: str, embedding: list, doc_name: str = None,
                   anchors: list = None, top_k: int = config.TOP_K,
                   knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
-                  concept: str = None, fusion: str = None) -> list:
+                  concept: str = None, fusion: str = None,
+                  weights: dict = None) -> list:
     """One statement either way. Native fusion returns a single blended
     SEARCH_SCORE(); RRF returns the per-channel derivation as well."""
-    if (fusion or config.HYBRID_FUSION) == "score":
+    mode = fusion or config.HYBRID_FUSION
+    if mode in config.NATIVE_STRATEGIES:
+        statement, params = build_native_statement(
+            question, embedding, doc_name, anchors, top_k, knn_k, title_boost,
+            concept, strategy=config.NATIVE_STRATEGIES[mode], weights=weights)
+        return query(statement, params)
+    if mode == "score":
         statement, params = build_fused_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
         return query(statement, params)
 
     statement, params = build_statement(
         question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
-    return rrf_merge(query(statement, params), top_k=top_k)
+    return rrf_merge(query(statement, params), top_k=top_k, weights=weights)
