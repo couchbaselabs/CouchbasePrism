@@ -208,3 +208,54 @@ def test_quarterly_question_resolves_to_the_10Q_despite_printed_form():
     ]
     assert catalog.resolve(docs, 2023, 2) == "X_2023Q2_10Q"
     assert catalog.resolve(docs, 2023, None) == "X_2023_10K"
+
+
+# ------------------------------------------------ subject before period
+
+MULTI = [
+    {"doc_name": "3M_2022_10K", "company": "3M COMPANY", "doc_type": "FORM 10-K",
+     "doc_period": 2022, "period_end_date_iso": "2022-12-31"},
+    {"doc_name": "ADOBE_2022_10K", "company": "ADOBE INC.", "doc_type": "FORM 10-K",
+     "doc_period": 2022, "period_end_date_iso": "2022-12-02"},
+    {"doc_name": "COCACOLA_2022_10K", "company": "THE COCA-COLA COMPANY",
+     "doc_type": "FORM 10-K", "doc_period": 2022, "period_end_date_iso": "2022-12-31"},
+    {"doc_name": "PG_E_2022_10K", "company": "PACIFIC GAS AND ELECTRIC COMPANY",
+     "doc_type": "FORM 10-K", "doc_period": 2022, "period_end_date_iso": "2022-12-31"},
+]
+
+
+def test_resolution_identifies_the_subject_not_just_the_period():
+    # With one company in the corpus, matching on year alone was 8/8 correct. On
+    # 40 companies the same code was 8% correct - an Adobe question resolved to
+    # 3M's filing, because every 2022 document matched equally.
+    assert catalog.resolve_for_question(MULTI, "What was Adobe's FY2022 revenue?") \
+        == "ADOBE_2022_10K"
+    assert catalog.resolve_for_question(MULTI, "What was 3M's FY2022 revenue?") \
+        == "3M_2022_10K"
+
+
+def test_subject_matching_survives_how_the_name_is_written():
+    # The filing says "THE COCA-COLA COMPANY"; a question says "Coca-Cola".
+    assert catalog.resolve_for_question(MULTI, "Coca-Cola's 2022 net sales?") \
+        == "COCACOLA_2022_10K"
+    # The filing never writes "PG&E", but the document name carries it.
+    assert catalog.resolve_for_question(MULTI, "What did PG&E report in 2022?") \
+        == "PG_E_2022_10K"
+
+
+def test_no_recognised_subject_leaves_the_catalog_unscoped():
+    # Returning nothing would be wrong for a single-subject corpus, which is the
+    # common deployment; the caller decides what an unscoped resolve means.
+    assert catalog.subject_candidates(MULTI, "What were revenues in 2022?") == []
+    assert catalog.resolve_for_question(MULTI, "What were revenues in 2022?") in {
+        d["doc_name"] for d in MULTI}
+
+
+def test_longer_subject_match_wins():
+    docs = [{"doc_name": "AMERICAN_2022_10K", "company": "AMERICAN AIRLINES",
+             "doc_period": 2022, "doc_type": "10-K", "period_end_date_iso": "2022-12-31"},
+            {"doc_name": "AMERICANWATERWORKS_2022_10K",
+             "company": "AMERICAN WATER WORKS COMPANY, INC.", "doc_period": 2022,
+             "doc_type": "10-K", "period_end_date_iso": "2022-12-31"}]
+    assert catalog.resolve_for_question(docs, "American Water Works 2022 revenue?") \
+        == "AMERICANWATERWORKS_2022_10K"
