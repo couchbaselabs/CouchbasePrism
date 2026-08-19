@@ -50,10 +50,29 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 #             the judge marked a verified-correct answer as a failure, and a
 #             stronger judge on the same recorded answers scored 5/8 rather than
 #             4/8. A weak grader silently understates the system.
-MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", OPENAI_MODEL)
-MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", OPENAI_MODEL)
-MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", OPENAI_MODEL)
-MODEL_JUDGE = os.environ.get("PRISM_MODEL_JUDGE", MODEL_ANSWER)
+# Defaults are measured, not assumed. Every one of these was chosen against a
+# result recorded in this repository's history:
+#
+# planner  gpt-5.4-mini. Dead anchors fell 53% -> 33% once the resolved document
+#          type and sector were supplied; gpt-4o-mini went the WRONG way on the
+#          same change (62% -> 66%), so the hint needs a model of at least this
+#          tier. ~2s, and nothing measured showed a larger planner doing better.
+# answer   gpt-5.4. It produced the fully verified answer on the operating-margin
+#          question - ten-plus figures, every one traced to the filing - in 28s
+#          against gpt-5.5's 160s for no measured gain. Decisive tiebreak:
+#          gpt-5.5 REJECTS temperature 0 and only accepts its default, so using
+#          it here makes every run irreproducible.
+# utility  gpt-5.4-nano. Extracted company, form and period across 354 documents
+#          without a failure. Cheapest tier that did the job.
+# judge    gpt-5.4-mini. Deliberately NOT the answer model: with one model in
+#          every role it grades its own output, which is how gpt-5.5 came to look
+#          worse than gpt-5.4. It agreed with gpt-5.5 on every question measured,
+#          and unlike gpt-5.5 it can pin temperature, so scores are repeatable.
+#          gpt-5.5 is the stricter alternative if a harsher grader is wanted.
+MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", "gpt-5.4-mini")
+MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", "gpt-5.4")
+MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", "gpt-5.4-nano")
+MODEL_JUDGE = os.environ.get("PRISM_MODEL_JUDGE", "gpt-5.4-mini")
 
 # Reasoning models are slow enough that the old 60-90s ceilings dropped whole
 # questions: one benchmark run lost a question to a 90s read timeout while the
@@ -89,7 +108,10 @@ def stage_models(planner: str = None, answer: str = None,
     chosen = {"planner": planner or MODEL_PLANNER,
               "answer": answer or MODEL_ANSWER,
               "utility": utility or MODEL_UTILITY,
-              "judge": judge or answer or MODEL_JUDGE}
+              # NOT `judge or answer`: defaulting the grader to the model being
+              # graded reintroduces self-grading the moment all roles are set
+              # the same.
+              "judge": judge or MODEL_JUDGE}
     return {stage: chosen[role] for stage, role in STAGE_ROLE.items()}
 EMBED_ENDPOINT = os.environ.get("MODEL_END_POINT", "")
 EMBED_MODEL = os.environ.get("MODEL_ID", "")

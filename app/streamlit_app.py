@@ -98,8 +98,12 @@ MODEL_ROLES = [
      "Binds facts to rows and columns, then writes the answer. Errors here are "
      "wrong numbers in front of a reader."),
     ("utility", "Classification", "gpt-5.4-nano",
-     "Catalog field extraction, the evaluation judge, anchor repair. Cheap and "
-     "high volume."),
+     "Catalog field extraction and anchor repair. Cheap and high volume - it "
+     "extracted company, form and period across 354 documents without a failure."),
+    ("judge", "Evaluation judge", "gpt-5.4-mini",
+     "Grades the answer against the benchmark reference. Evaluation only, never "
+     "part of an answer path. Keep it OFF the answer model: a model grading its "
+     "own output is how gpt-5.5 came to look worse than gpt-5.4."),
 ]
 PHASE_HELP = {
     "1-vector": "Textbook RAG · kNN across the whole corpus, no scoping",
