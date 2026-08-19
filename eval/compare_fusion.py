@@ -82,6 +82,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--company", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--force-gold-doc", action="store_true",
+                        help="search the annotated document instead of resolving it, "
+                             "isolating retrieval quality from resolution accuracy")
     args = parser.parse_args()
 
     questions = gold_questions(args.company)
@@ -95,11 +98,17 @@ def main():
     if dropped:
         print(f"skipped {len(dropped)} question(s) whose document was not ingested")
     catalog_docs = catalog.load_all()
-    print(f"{len(questions)} questions with annotated evidence pages\n")
+    print(f"{len(questions)} questions with annotated evidence pages"
+          + ("  [document FORCED to the annotated one]" if args.force_gold_doc
+             else "  [document resolved by the catalog]") + "\n")
 
     results = {label: [] for label, _ in CONFIGS}
     for q in questions:
-        doc = catalog.resolve_for_question(catalog_docs, q["question"]) or q["doc_name"]
+        # Resolution and retrieval both fail, and the combined number cannot say
+        # which. Forcing the annotated document measures retrieval alone.
+        doc = (q["doc_name"] if args.force_gold_doc
+               else catalog.resolve_for_question(catalog_docs, q["question"])
+               or q["doc_name"])
         plan = plan_evidence(q["question"])          # ONCE - reused by every config
         anchors, concept = plan_anchors(plan), plan.get("concept")
         embedding = embed(q["question"])             # ONCE

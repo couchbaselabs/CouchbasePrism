@@ -148,7 +148,15 @@ KNN_CANDIDATES = 200
 # "rrf"         Our own: two SEARCH channels unioned in one statement, merged in
 #               code. Kept because it works on any version and because it
 #               reports each channel's rank and contribution per chunk.
-HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "score")
+# Measured over 143 questions against FinanceBench's annotated evidence pages:
+# sum, native-rrf, native-rsf and our in-code rrf are indistinguishable on
+# recall (0.58-0.60 resolved, 0.81-0.85 with the document forced). Fusion
+# strategy is not a quality lever on this corpus. native-rrf is the default
+# because it ties for best recall while being ~30% faster than the in-code
+# version - one statement, no application-side merge - and `explain` still
+# exposes the per-channel breakdown. native-dbsf is measurably WORSE (0.44) and
+# is kept only as the counter-example.
+HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "native-rrf")
 NATIVE_STRATEGIES = {"native-rrf": "rrf", "native-rsf": "rsf", "native-dbsf": "dbsf"}
 # Native equivalents of RRF_K and LEG_CANDIDATES. score_window_size must be >=
 # the requested size, and is the per-channel result set fusion considers.
