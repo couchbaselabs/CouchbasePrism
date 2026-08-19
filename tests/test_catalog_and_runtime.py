@@ -182,3 +182,29 @@ def test_repair_is_skipped_when_there_is_nothing_to_repair():
     # cost a model call - repair is only worth paying for when it can work.
     assert retrieval.repair_anchors("q", [], [{"text": "x"}]) == ([], [])
     assert retrieval.repair_anchors("q", ["missing label"], []) == ([], [])
+
+
+# ------------------------------------------------ printed vs canonical form
+
+def test_form_is_recognised_however_the_cover_page_printed_it():
+    # Extraction preserves the printed string on purpose, so comparison must
+    # normalise. Different extraction models returned "10-K" and "FORM 10-K",
+    # and an exact == comparison silently sent everything to the fallback.
+    for printed in ("10-K", "FORM 10-K", "Form 10-K", "10K", "ANNUAL REPORT FORM 10-K"):
+        assert catalog.form_of(printed) == "10-K", printed
+    for printed in ("10-Q", "FORM 10-Q", "form 10q"):
+        assert catalog.form_of(printed) == "10-Q", printed
+    assert catalog.form_of("8-K") == "8-K"
+    assert catalog.form_of(None) is None
+    assert catalog.form_of("ANNUAL REPORT") is None
+
+
+def test_quarterly_question_resolves_to_the_10Q_despite_printed_form():
+    docs = [
+        {"doc_name": "X_2023_10K", "doc_type": "FORM 10-K", "doc_period": 2023,
+         "period_end_date_iso": "2023-12-31"},
+        {"doc_name": "X_2023Q2_10Q", "doc_type": "FORM 10-Q", "doc_period": 2023,
+         "period_end_date_iso": "2023-06-30"},
+    ]
+    assert catalog.resolve(docs, 2023, 2) == "X_2023Q2_10Q"
+    assert catalog.resolve(docs, 2023, None) == "X_2023_10K"

@@ -13,4 +13,4 @@ from .extraction import (  # noqa: F401
     cover_text, to_iso_date, year_of,
 )
 from .repository import ingested_doc_names, ensure_index, load_all, upsert  # noqa: F401
-from .resolver import period_from_question, resolve, resolve_for_question  # noqa: F401
+from .resolver import form_of, period_from_question, resolve, resolve_for_question  # noqa: F401
