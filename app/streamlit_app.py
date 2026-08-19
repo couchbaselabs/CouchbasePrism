@@ -237,14 +237,20 @@ def sql_kind(event: dict) -> str:
     labels made it impossible to tell at a glance whether the FTS index was
     being used at all."""
     statement = event.get("statement", "")
-    if "SEARCH_SCORE()" in statement or "SEARCH(" in statement:
-        return "Hybrid SEARCH() · BM25 + kNN via the Search Vector Index"
-    if "matched_anchors" in statement:
-        return "Content anchors · exact row-label match"
-    if "APPROX_VECTOR_DISTANCE" in statement:
-        return "Vector kNN · Hyperscale Vector Index"
     if "`catalog`" in statement:
         return "Catalog lookup"
+    if "matched_anchors" in statement:
+        return "Content anchors · exact row-label match"
+    if "SEARCH(" in statement:
+        # All three retrieval shapes are now SEARCH() against the same Search
+        # Vector Index, so the label has to come from the query object rather
+        # than from the function name. Order matters: the union carries both.
+        if "UNION ALL" in statement:
+            return ("Two channels, one statement · BM25 + kNN unioned, "
+                    "fused by reciprocal rank")
+        if "match_phrase" in statement or "disjuncts" in statement:
+            return "Hybrid SEARCH() · BM25 + kNN fused by the Search service"
+        return "Vector kNN only · Search Vector Index"
     return "SQL++"
 
 

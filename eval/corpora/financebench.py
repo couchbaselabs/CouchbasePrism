@@ -4,8 +4,12 @@ FinanceBench (github.com/patronus-ai/financebench) is ONE test suite, not the
 system. Everything corpus-specific lives behind this adapter's interface so a
 second suite is a new file here, not a refactor of the pipeline.
 
-Their `financebench_document_information.jsonl` is deliberately NOT used as
-input - PRISM builds its own catalog and is scored against theirs.
+Their `financebench_document_information.jsonl` is deliberately NOT used for the
+fields PRISM extracts itself - company, form type and period come from the PDF
+so the extraction is what gets scored. `gics_sector` is different: it is not
+printed on the cover page, it is an external classification, and inferring it
+with a model would invite exactly the confident fabrication we already saw with
+tickers. So it is read from their metadata, with provenance recorded.
 """
 import json
 import pathlib
@@ -48,3 +52,15 @@ def documents(company: str = None) -> list:
     """Source PDFs, as (doc_name, path) pairs."""
     pattern = f"{company}_*.pdf" if company else "*.pdf"
     return [(p.stem, p) for p in sorted(pdf_dir().glob(pattern))]
+
+
+def sectors() -> dict:
+    """{doc_name: gics_sector} from the corpus's own document metadata."""
+    path = ROOT / "data" / "financebench_document_information.jsonl"
+    out = {}
+    with open(path) as f:
+        for line in f:
+            row = json.loads(line)
+            if row.get("gics_sector"):
+                out[row["doc_name"]] = row["gics_sector"]
+    return out

@@ -12,5 +12,5 @@ from .extraction import (  # noqa: F401
     apply_grounding_check, build_document, build_from_pdf, classify_cover,
     cover_text, to_iso_date, year_of,
 )
-from .repository import ensure_index, load_all, upsert  # noqa: F401
+from .repository import ingested_doc_names, ensure_index, load_all, upsert  # noqa: F401
 from .resolver import period_from_question, resolve, resolve_for_question  # noqa: F401

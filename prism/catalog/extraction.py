@@ -98,10 +98,18 @@ def to_iso_date(date_str: str):
     return None
 
 
-def build_document(doc_name: str, extraction: dict) -> dict:
+def build_document(doc_name: str, extraction: dict,
+                   gics_sector: str = None) -> dict:
+    """Only the fields something actually reads.
+
+    Each extracted field keeps its {value, confidence, source_span} envelope
+    because those drive the grounding check. `gics_sector` has no envelope: it is
+    not extracted from the document at all, so a confidence score would be
+    fiction. Its provenance is recorded in `lineage` instead.
+    """
     period = extraction.get("period_end_date", {})
     raw = period.get("value")
-    return {
+    document = {
         "doc_id": doc_name,
         "doc_name": doc_name,
         "type": "catalog_document",
@@ -115,7 +123,13 @@ def build_document(doc_name: str, extraction: dict) -> dict:
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
     }
+    if gics_sector:
+        document["gics_sector"] = gics_sector
+        document["lineage"]["gics_sector"] = "corpus_metadata"
+    return document
 
 
-def build_from_pdf(pdf_path: str, doc_name: str, model: str = None) -> dict:
-    return build_document(doc_name, classify_cover(cover_text(pdf_path), model=model))
+def build_from_pdf(pdf_path: str, doc_name: str, model: str = None,
+                   gics_sector: str = None) -> dict:
+    return build_document(doc_name, classify_cover(cover_text(pdf_path), model=model),
+                          gics_sector=gics_sector)

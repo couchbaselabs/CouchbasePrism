@@ -8,8 +8,8 @@ to that service, not code here.
     anchor_probe     drop anchors the corpus cannot match
     anchor_repair    look at the source, then re-plan the dead ones
     anchor_search    printed row labels -> the right chunk (IDF-ranked)
-    vector_search    dense kNN over the Hyperscale Vector Index
-    hybrid_search    BM25 + kNN through a Search Vector Index
+    vector_search    dense kNN-only over the Search Vector Index
+    hybrid_search    BM25 + kNN through the same Search Vector Index
     combined_search  assemble and dedupe
 """
 from .anchor_probe import filter_anchors, probe_anchors  # noqa: F401

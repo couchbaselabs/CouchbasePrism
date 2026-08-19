@@ -26,16 +26,32 @@ def build_catalog(args):
     if not docs:
         sys.exit(f"no documents matched company={args.company!r} in {corpus.NAME}")
     couchbase_io.ensure_primary_index(config.CATALOG_COLLECTION)
+    sectors = corpus.sectors() if hasattr(corpus, "sectors") else {}
+
+    if not args.all:
+        # Catalog only what is retrievable. Ingestion fails per document, and an
+        # entry with no chunks makes resolution point at an empty document.
+        ingested = catalog.ingested_doc_names()
+        skipped = [n for n, _ in docs if n not in ingested]
+        docs = [(n, p) for n, p in docs if n in ingested]
+        if skipped:
+            print(f"skipping {len(skipped)} document(s) with no chunks ingested "
+                  f"(use --all to override): {', '.join(sorted(skipped)[:6])}"
+                  + (" ..." if len(skipped) > 6 else ""), file=sys.stderr)
+        if not docs:
+            sys.exit("no catalogued documents have chunks; is the workflow finished?")
     print(f"building catalog for {len(docs)} documents -> "
           f"{config.BUCKET}.{config.SCOPE}.{config.CATALOG_COLLECTION}", file=sys.stderr)
     for i, (doc_name, path) in enumerate(docs, 1):
         try:
-            document = catalog.build_from_pdf(str(path), doc_name, model=args.model)
+            document = catalog.build_from_pdf(str(path), doc_name, model=args.model,
+                                              gics_sector=sectors.get(doc_name))
             catalog.upsert(document)
             print(f"  [{i}/{len(docs)}] {doc_name}: "
                   f"company={(document['company'] or {}).get('value')!r} "
                   f"type={(document['doc_type'] or {}).get('value')!r} "
-                  f"period={document['doc_period']}", file=sys.stderr)
+                  f"period={document['doc_period']} "
+                  f"sector={document.get('gics_sector')!r}", file=sys.stderr)
         except Exception as e:
             print(f"  [{i}/{len(docs)}] {doc_name}: ERROR {e}", file=sys.stderr)
 
@@ -96,6 +112,8 @@ def main():
     sub = ap.add_subparsers(dest="command", required=True)
 
     b = sub.add_parser("build-catalog")
+    b.add_argument("--all", action="store_true",
+                   help="catalog every PDF, including ones with no chunks ingested")
     b.add_argument("--corpus", default="financebench")
     b.add_argument("--company", default=None)
     b.add_argument("--model", default=None)
