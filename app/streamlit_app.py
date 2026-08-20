@@ -93,16 +93,16 @@ MODEL_OPTIONS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5",
 # Roles, not call sites - see prism.config.STAGE_ROLE. Binding sits with answer
 # rather than utility because choosing the wrong column is not a tagging error.
 MODEL_ROLES = [
-    ("planner", "Planner", "gpt-5.4-mini",
+    ("planner", "Planner", "gpt-5.4",
      "Evidence plan and candidate calculation conventions - proposes structure "
      "it cannot verify."),
     ("answer", "Binding + answer", "gpt-5.5",
      "Binds facts to rows and columns, then writes the answer. Errors here are "
      "wrong numbers in front of a reader."),
-    ("utility", "Classification", "gpt-5.4-nano",
+    ("utility", "Classification", "gpt-5.4",
      "Catalog field extraction and anchor repair. Cheap and high volume - it "
      "extracted company, form and period across 354 documents without a failure."),
-    ("judge", "Evaluation judge", "gpt-5.4-mini",
+    ("judge", "Evaluation judge", "gpt-5.4",
      "Grades the answer against the benchmark reference. Evaluation only, never "
      "part of an answer path. Keep it OFF the answer model: a model grading its "
      "own output is how gpt-5.5 came to look worse than gpt-5.4."),

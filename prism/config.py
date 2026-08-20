@@ -32,7 +32,7 @@ def source_filename(doc_name: str) -> str:
 
 
 # --- Models ----------------------------------------------------------------
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4")
 
 # Model per ROLE, not per call site. Three roles, because the stages differ in
 # what they actually need:
@@ -53,10 +53,11 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 # Defaults are measured, not assumed. Every one of these was chosen against a
 # result recorded in this repository's history:
 #
-# planner  gpt-5.4-mini. Dead anchors fell 53% -> 33% once the resolved document
-#          type and sector were supplied; gpt-4o-mini went the WRONG way on the
-#          same change (62% -> 66%), so the hint needs a model of at least this
-#          tier. ~2s, and nothing measured showed a larger planner doing better.
+# planner  gpt-5.4. gpt-5.4-mini names an aggregate the source never prints
+#          ("quick_assets") in 3 of 3 runs and cannot follow the union-of-
+#          conventions rule; gpt-5.4 produces the union in 2 of 3, which is what
+#          makes candidate sets materially distinct (spread 0.005-0.049 against
+#          0.0). Costs roughly 70% more planning latency.
 # answer   gpt-5.4. It produced the fully verified answer on the operating-margin
 #          question - ten-plus figures, every one traced to the filing - in 28s
 #          against gpt-5.5's 160s for no measured gain. Decisive tiebreak:
@@ -64,15 +65,15 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 #          it here makes every run irreproducible.
 # utility  gpt-5.4-nano. Extracted company, form and period across 354 documents
 #          without a failure. Cheapest tier that did the job.
-# judge    gpt-5.4-mini. Deliberately NOT the answer model: with one model in
-#          every role it grades its own output, which is how gpt-5.5 came to look
-#          worse than gpt-5.4. It agreed with gpt-5.5 on every question measured,
-#          and unlike gpt-5.5 it can pin temperature, so scores are repeatable.
-#          gpt-5.5 is the stricter alternative if a harsher grader is wanted.
-MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", "gpt-5.4-mini")
+# judge    gpt-5.4, by explicit choice - which means it grades output from its
+#          own tier. Self-grading is a measurable confound: it is how gpt-5.5
+#          came to look worse than gpt-5.4 in a side-by-side. Set
+#          PRISM_MODEL_JUDGE to a different model when a score has to be
+#          defensible to someone else.
+MODEL_PLANNER = os.environ.get("PRISM_MODEL_PLANNER", "gpt-5.4")
 MODEL_ANSWER = os.environ.get("PRISM_MODEL_ANSWER", "gpt-5.4")
-MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", "gpt-5.4-nano")
-MODEL_JUDGE = os.environ.get("PRISM_MODEL_JUDGE", "gpt-5.4-mini")
+MODEL_UTILITY = os.environ.get("PRISM_MODEL_UTILITY", "gpt-5.4")
+MODEL_JUDGE = os.environ.get("PRISM_MODEL_JUDGE", "gpt-5.4")
 
 # Reasoning models are slow enough that the old 60-90s ceilings dropped whole
 # questions: one benchmark run lost a question to a 90s read timeout while the
