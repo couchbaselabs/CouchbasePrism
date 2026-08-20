@@ -66,7 +66,13 @@ Return ONLY one valid JSON object:
 
 GUIDELINES:
 
-- Return materially distinct, genuinely defensible methods.
+- Return materially distinct, genuinely defensible methods. Two methods that
+  differ only in how the same inclusion is expressed are NOT distinct: adding
+  three components and adding two of the same three is one method, spelled
+  twice. Distinct methods disagree about WHICH source values belong.
+- Every candidate must still be the requested concept. A related but different
+  measure is not an alternative convention for this one, and offering it makes
+  the candidates disagree for a reason that has nothing to do with ambiguity.
 - Do not claim that the candidates are exhaustive.
 - Do not rank or choose among candidates.
 - Do not add alternatives merely to increase the candidate count.
