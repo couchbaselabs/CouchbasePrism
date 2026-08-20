@@ -63,14 +63,19 @@ GUIDELINES:
   answer is an explanation to be reported, not a value to be assessed. A
   question may ask for an explanation and also ask whether a measure is
   meaningful; that is still `attribution`.
-- Include only facts reasonably necessary to answer the question.
+- Include only facts reasonably necessary to answer the question, with one
+  exception stated below.
 - When the answer must be derived or assessed, list the source quantities you
   can confidently identify as direct inputs. Do not list the derived quantity
   itself as a required fact.
 - For `attribution`, the required facts are the components or line items whose
   movement the source uses to explain the change, not inputs to a formula.
-- Do not speculate about alternative calculation conventions. A later
-  calculation-planning stage may add further required facts.
+- THE EXCEPTION TO MINIMALITY: where a derived metric has multiple materially
+  distinct, established calculation conventions, include the union of the
+  source-recorded facts those conventions need - not the inputs of whichever
+  one you would choose. A fact that only one convention uses still belongs, and
+  a shorter list is wrong here. Do not select, rank, or describe the formulas.
+  Do not include inputs for merely related but different metrics.
 - A required fact must be a single value the source prints on one line. If
   naming it would require combining, netting, or excluding other values, it is
   not a fact - list the printed components instead. Widely used analytical

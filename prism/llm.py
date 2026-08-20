@@ -80,6 +80,11 @@ def _post(body: dict, timeout: int, stage: str = None) -> dict:
     """
     started = time.perf_counter()
     body = _adapt(body)
+    # Attempts tracked per CALL, not per model. Keying the retry on "has this
+    # model already taught us about this parameter" fails under concurrency: when
+    # several threads hit the same 400 at once, the first records it and the rest
+    # see it as already known and give up without retrying.
+    tried = set()
     while True:
         try:
             resp = requests.post(
@@ -89,11 +94,9 @@ def _post(body: dict, timeout: int, stage: str = None) -> dict:
             )
             if resp.status_code == 400:
                 param = _learn_rejection(resp)
-                if param and param not in _REJECTED_PARAMS.setdefault(
-                        body.get("model"), set()):
-                    # Learn it once per model, then retry the same call. Every
-                    # later call for this model is adapted before it is sent.
-                    _REJECTED_PARAMS[body["model"]].add(param)
+                if param and param not in tried:
+                    tried.add(param)
+                    _REJECTED_PARAMS.setdefault(body.get("model"), set()).add(param)
                     body = _adapt(dict(body))
                     continue
             resp.raise_for_status()
