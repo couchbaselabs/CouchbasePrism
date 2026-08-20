@@ -135,67 +135,43 @@ PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
 
 
 def tuning_panel(fusion: str) -> dict:
-    """Retrieval dials, each labelled with what it was measured to do.
+    """Retrieval dials, each with a one-line statement of what it is.
 
-    A demo that shows knobs teaches that tuning matters. Measurement here says
-    mostly it does not - fusion strategy, rank constant and window size are worth
-    little or nothing, weighting actively hurts, and the one large lever
-    (document resolution) has no dial at all. Showing each control beside its
-    measured effect teaches the real lesson instead of the flattering one.
-
-    Every control returns None when untouched, so a default run is byte-identical
-    to one from before this panel existed.
+    Every control returns None when untouched, so a run that touches no dial is
+    identical to one from before this panel existed.
     """
     out = {}
-    with st.expander("Tuning surface — and what it's worth",
-                     icon=":material/tune:"):
-        st.caption("Measured over 143 questions against FinanceBench's annotated "
-                   "evidence pages. Leave everything alone for the defaults.")
-
+    with st.expander("Tuning surface", icon=":material/tune:"):
         if fusion in ("native-rrf", "rrf"):
             out["rank_constant"] = st.slider(
-                "Rank constant · k in 1/(k + rank)", 1, 120, config.RRF_K,
-                key="dial_rank_constant",
-                help="Higher damps the difference between ranks, so agreement "
-                     "across channels matters more than being first in one.")
-            st.caption(f"Measured: k=1 improved recall@5 0.38 → 0.50 and mean gold "
-                       f"rank 5.0 → 4.2, while recall@10 was **unchanged** — it "
-                       f"reorders the evidence set without changing which chunks "
-                       f"are in it.")
+                "Rank constant", 1, 120, config.RRF_K, key="dial_rank_constant")
+            st.caption("The k in 1/(k + rank). Low values reward being first in a "
+                       "channel; high values reward appearing in both.")
 
         out["window_size"] = st.slider(
-            "Window size · candidates fused per channel", 10, 400,
-            config.NATIVE_WINDOW_SIZE, step=10, key="dial_window")
-        st.caption("Measured: 10 versus 200 produced **identical** results at this "
-                   "corpus size. The documented tradeoff is relevance against "
-                   "performance; here there is nothing to trade.")
+            "Window size", 10, 400, config.NATIVE_WINDOW_SIZE, step=10,
+            key="dial_window")
+        st.caption("How many results from each channel are considered for fusion. "
+                   "Must be at least the evidence budget.")
 
         left, right = st.columns(2)
         out["bm25_weight"] = left.number_input("Lexical weight", 0.0, 10.0, 1.0, 0.5,
-                                              key="dial_bm25")
+                                               key="dial_bm25")
         out["vector_weight"] = right.number_input("Vector weight", 0.0, 10.0, 1.0, 0.5,
                                                   key="dial_vector")
-        st.caption("Weights are each query's boost. Measured: lexical ×3 **cost 5 "
-                   "points** of recall@10. Three separate experiments have now "
-                   "found weighting worse than leaving it alone.")
+        st.caption("Each channel's relative importance, written into the statement "
+                   "as that query's boost. Equal weights mean neither is favoured.")
 
-        out["knn_k"] = st.slider("Vector candidate depth · knn k", 10, 500,
+        out["knn_k"] = st.slider("Vector candidate depth", 10, 500,
                                  config.KNN_CANDIDATES, step=10, key="dial_knn")
-        st.caption("Measured: this one is real. At k=50 a chunk BM25 ranked first "
-                   "was unreachable; at k=100 it appeared at rank 7. It sets how "
-                   "much of the corpus the vector channel offers up for fusion.")
+        st.caption("How many nearest neighbours the vector channel offers up. A "
+                   "chunk outside this depth cannot be fused, however well it "
+                   "matches lexically.")
 
-        out["top_k"] = st.slider("Evidence budget · chunks sent to the model",
-                                 3, 25, config.TOP_K, key="dial_topk")
-        st.caption("Not a retrieval dial: it decides how much reaches the answer "
-                   "stage. Shrinking it makes rank order matter, which is when the "
-                   "rank constant starts to pay.")
-
-        st.info("The largest measured lever has no control here. Document "
-                "resolution accounts for roughly 25 of the 40 missing points of "
-                "recall@10 — 0.68 resolved against 0.89 with the right document "
-                "forced. That is a correctness problem, not a tuning one.",
-                icon=":material/lightbulb:")
+        out["top_k"] = st.slider("Evidence budget", 3, 25, config.TOP_K,
+                                 key="dial_topk")
+        st.caption("How many chunks reach the answer stage. Smaller budgets make "
+                   "rank order matter more.")
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -841,8 +817,8 @@ def render_detail(run: dict):
                 was = previous.get(key)
                 rows.append({
                     "Final": i, "Page": c.get("page"), "Type": c.get("type"),
-                    "BM25 rank": (channels.get("bm25") or {}).get("rank"),
-                    "Vector rank": (channels.get("vector") or {}).get("rank"),
+                    "BM25 rank": (channels.get("bm25") or {}).get("rank", "n/a"),
+                    "Vector rank": (channels.get("vector") or {}).get("rank", "n/a"),
                     "Fused score": round(c.get("rrf_score") or c.get("score") or 0, 6),
                     "Moved": ("new" if was is None else
                               "—" if was == i else f"{'↑' if was > i else '↓'}{abs(was - i)}"),

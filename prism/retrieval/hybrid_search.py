@@ -143,18 +143,21 @@ SELECT RAW vector FROM (
 def build_fused_statement(question: str, embedding: list, doc_name: str = None,
                           anchors: list = None, top_k: int = config.TOP_K,
                           knn_k: int = config.KNN_CANDIDATES,
-                          title_boost: float = 0.0, concept: str = None) -> tuple:
+                          title_boost: float = 0.0, concept: str = None,
+                          weights: dict = None) -> tuple:
     """The ORIGINAL single fused SEARCH(): lexical and kNN in one query object,
     scores summed by the Search service. Retained as a fallback - see the module
     docstring for why it is not the default. Reachable via
     config.HYBRID_FUSION = "score"."""
+    weights = weights or {}
     params = {"$query_vector": embedding}
     lexical = _lexical_clause(question, anchors, concept, title_boost, params)
     knn_filter = ""
     if doc_name:
         params["$filename"] = config.source_filename(doc_name)
         scope = '{"field": "xmeta-data.filename", "match": $filename}'
-        query_clause = f'{{"conjuncts": [{scope}, {lexical}]}}'
+        query_clause = (f'{{"conjuncts": [{scope}, {lexical}], '
+                        f'"boost": {weights.get("bm25", 1.0)}}}')
         knn_filter = f', "filter": {scope}'
     else:
         query_clause = lexical
@@ -208,13 +211,17 @@ def parse_explanation(explanation: dict) -> dict:
         if match:
             _, weight, rank, constant = match.groups()
             child = (node.get("children") or [{}])[0]
-            channels[_channel_of(node)] = {
-                "rank": int(rank) if rank else None,
-                "weight": float(weight),
-                "rank_constant": int(constant) if constant else None,
-                "raw_score": round(child.get("value") or 0.0, 6),
-                "contribution": round(node.get("value") or 0.0, 6),
-            }
+            # Relative score fusion has no ranks - it normalises scores. Emitting
+            # "rank": null invites the reader to wonder what went wrong, so the
+            # key is simply absent when the strategy does not use one.
+            channel = {"weight": float(weight),
+                       "raw_score": round(child.get("value") or 0.0, 6),
+                       "contribution": round(node.get("value") or 0.0, 6)}
+            if rank:
+                channel["rank"] = int(rank)
+            if constant:
+                channel["rank_constant"] = int(constant)
+            channels[_channel_of(node)] = channel
         stack.extend(node.get("children") or [])
     return channels
 
@@ -231,7 +238,12 @@ def build_native_statement(question: str, embedding: list, doc_name: str = None,
     server reads channel importance - verified: a lexical boost of 5 multiplies
     that channel's contribution by 5 (5/61 = 0.08197 at rank 1).
     """
+    # The boost is ALWAYS written, even at 1.0. It is how channel weight is
+    # expressed, and a statement that omits it at the default hides where the
+    # weight would go - which is the one thing a reader of this SQL wants to see.
     weights = weights or {}
+    bm25_weight = weights.get("bm25", 1.0)
+    vector_weight = weights.get("vector", 1.0)
     params = {"$query_vector": embedding}
     lexical = _lexical_clause(question, anchors, concept, title_boost, params)
 
@@ -242,16 +254,11 @@ def build_native_statement(question: str, embedding: list, doc_name: str = None,
         query_clause = f'{{"conjuncts": [{scope}, {lexical}]'
         knn_filter = f', "filter": {scope}'
     else:
-        query_clause = lexical[:-1] if lexical.endswith("}") else lexical
         query_clause = '{"disjuncts": [' + lexical.split('[', 1)[1].rsplit(']', 1)[0] + ']'
-    bm25_weight = weights.get("bm25")
-    query_clause += (f', "boost": {bm25_weight}}}' if bm25_weight is not None else "}")
+    query_clause += f', "boost": {bm25_weight}}}'
 
-    vector_weight = weights.get("vector")
     knn = (f'"knn": [{{"field": "text-embedding", "vector": $query_vector, '
-           f'"k": {knn_k}{knn_filter}'
-           + (f', "boost": {vector_weight}' if vector_weight is not None else "")
-           + "}]")
+           f'"k": {knn_k}{knn_filter}, "boost": {vector_weight}}}]')
 
     constant = config.NATIVE_RANK_CONSTANT if rank_constant is None else rank_constant
     window = max(window_size or config.NATIVE_WINDOW_SIZE, top_k)
@@ -347,7 +354,8 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
         return rows
     if mode == "score":
         statement, params = build_fused_statement(
-            question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
+            question, embedding, doc_name, anchors, top_k, knn_k, title_boost,
+            concept, weights=weights)
         return query(statement, params)
 
     statement, params = build_statement(
