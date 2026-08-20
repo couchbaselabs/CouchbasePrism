@@ -24,7 +24,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from eval import judge, phases  # noqa: E402
 from eval.corpora import load as load_corpus  # noqa: E402
-from prism import catalog, config, dictionary, runtime, trace  # noqa: E402
+from prism import (  # noqa: E402
+    catalog, config, dictionary, retrieval, runtime, trace,
+)
 
 
 st.set_page_config(
@@ -680,8 +682,50 @@ def render_detail(run: dict):
                            "The next run executes it deterministically.")
                 options = {f"{c['label']} · {c['value']:.6g}": c
                            for c in calc["computed"]}  # label is method_name
-                picked = st.selectbox("Approved convention", list(options),
+                CUSTOM = "Write my own convention…"
+                picked = st.selectbox("Approved convention", list(options) + [CUSTOM],
                                       key=f"approve_{q['id']}")
+
+                # The human must be able to approve a convention the model did
+                # not propose. Restricting approval to the model's menu makes the
+                # loop ratification, not governance - and it bites: the planner
+                # stopped naming the facts one standard convention needs, so that
+                # convention stopped being proposable, and it could no longer be
+                # approved here at all.
+                formula = None
+                if picked == CUSTOM:
+                    bound = sorted({f.get("name") for f in result["bound_facts"]
+                                    if f.get("name")})
+                    default = options[list(options)[0]]["formula"] if options else ""
+                    formula = st.text_input(
+                        "Formula", value=default, key=f"formula_{q['id']}",
+                        help="Identifiers, numbers, parentheses and + - * / only. "
+                             "Each identifier must be a fact the binder can locate "
+                             "in the source.")
+                    problem = runtime.validate_candidate({
+                        "formula": formula,
+                        "required_facts": [{"id": i} for i in
+                                           retrieval.formula_identifiers(formula)]})
+                    used = sorted(retrieval.formula_identifiers(formula))
+                    if problem and not used and formula.strip():
+                        # validate_candidate reports "references no facts" for an
+                        # unparseable formula, which reads as the wrong problem.
+                        st.error("Could not parse this formula. Use identifiers, "
+                                 "numbers, parentheses and + - * / only.",
+                                 icon=":material/error:")
+                    elif problem:
+                        st.error(problem, icon=":material/error:")
+                    elif used:
+                        unseen = [u for u in used if u not in bound]
+                        st.caption(f"References: {', '.join(used)}")
+                        if unseen:
+                            st.warning(
+                                f"Not bound in this run: {', '.join(unseen)}. The next "
+                                "run must locate them or the formula will not evaluate.",
+                                icon=":material/info:")
+                    formula = None if problem else formula
+                else:
+                    formula = options[picked]["formula"]
 
                 # A judgment question cannot be answered by the formula alone -
                 # "is 0.96 healthy?" is a threshold opinion, and PRISM declines
@@ -704,9 +748,9 @@ def render_detail(run: dict):
                                "PRISM will compute the value and still decline the "
                                "verdict.", icon=":material/info:")
 
-                if st.button("Approve and learn", type="primary",
+                if st.button("Approve and learn", type="primary", disabled=not formula,
                              icon=":material/verified:", key=f"approve_button_{q['id']}"):
-                    dictionary.approve(result["concept"], options[picked]["formula"],
+                    dictionary.approve(result["concept"], formula,
                                        threshold if use_threshold else None)
                     st.session_state.pop("showcase_runs", None)
                     st.toast("Approved. Re-run the question to see governed behavior.",
