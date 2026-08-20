@@ -12,7 +12,7 @@ reach the others and cost a passing question.
 """
 from dataclasses import dataclass
 
-from .. import catalog, dictionary, retrieval
+from .. import catalog, config, dictionary, retrieval
 from .answer import synthesize
 from .calculation import compute, propose_candidates
 from .fact_binding import bind_facts, grounded_facts, to_identifier, validate_bindings
@@ -57,6 +57,14 @@ class PipelineOptions:
     governance: bool = True       # bind, compute, validate, consult the dictionary
     fusion: str = None            # "score" (Couchbase native) or "rrf"; None = config
     source_context: bool = True   # tell the planner the resolved doc type/period
+    # Retrieval tuning. None means "use the configured default", so a run that
+    # touches no dial is identical to one from before the dials existed.
+    rank_constant: int = None     # RRF only: 1/(k + rank)
+    window_size: int = None       # per-channel result set fusion considers
+    bm25_weight: float = None     # lexical channel weight (a query boost)
+    vector_weight: float = None   # vector channel weight (a knn boost)
+    knn_k: int = None             # vector candidate depth
+    top_k: int = None             # evidence budget handed to the model
 
 
 def answer_question(question: str, catalog_docs: list, dictionary_data: dict = None,
@@ -74,10 +82,16 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)
     context = describe_source(entry) if options.source_context else None
     plan = retrieval.plan_evidence(question, model=model, source_context=context)
+    weights = {k: v for k, v in (("bm25", options.bm25_weight),
+                                 ("vector", options.vector_weight)) if v is not None}
     chunks = retrieval.retrieve(question, plan, doc_name,
                                 use_anchors=options.anchors, use_bm25=options.bm25,
                                 title_boost=options.title_boost,
-                                fusion=options.fusion)
+                                fusion=options.fusion, weights=weights or None,
+                                rank_constant=options.rank_constant,
+                                window_size=options.window_size,
+                                knn_k=options.knn_k,
+                                top_k=options.top_k or config.TOP_K)
 
     kind = plan.get("answer_kind")
     entry = policy = None

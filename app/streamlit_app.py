@@ -135,6 +135,72 @@ PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def tuning_panel(fusion: str) -> dict:
+    """Retrieval dials, each labelled with what it was measured to do.
+
+    A demo that shows knobs teaches that tuning matters. Measurement here says
+    mostly it does not - fusion strategy, rank constant and window size are worth
+    little or nothing, weighting actively hurts, and the one large lever
+    (document resolution) has no dial at all. Showing each control beside its
+    measured effect teaches the real lesson instead of the flattering one.
+
+    Every control returns None when untouched, so a default run is byte-identical
+    to one from before this panel existed.
+    """
+    out = {}
+    with st.expander("Tuning surface — and what it's worth",
+                     icon=":material/tune:"):
+        st.caption("Measured over 143 questions against FinanceBench's annotated "
+                   "evidence pages. Leave everything alone for the defaults.")
+
+        if fusion in ("native-rrf", "rrf"):
+            out["rank_constant"] = st.slider(
+                "Rank constant · k in 1/(k + rank)", 1, 120, config.RRF_K,
+                key="dial_rank_constant",
+                help="Higher damps the difference between ranks, so agreement "
+                     "across channels matters more than being first in one.")
+            st.caption(f"Measured: k=1 improved recall@5 0.38 → 0.50 and mean gold "
+                       f"rank 5.0 → 4.2, while recall@10 was **unchanged** — it "
+                       f"reorders the evidence set without changing which chunks "
+                       f"are in it.")
+
+        out["window_size"] = st.slider(
+            "Window size · candidates fused per channel", 10, 400,
+            config.NATIVE_WINDOW_SIZE, step=10, key="dial_window")
+        st.caption("Measured: 10 versus 200 produced **identical** results at this "
+                   "corpus size. The documented tradeoff is relevance against "
+                   "performance; here there is nothing to trade.")
+
+        left, right = st.columns(2)
+        out["bm25_weight"] = left.number_input("Lexical weight", 0.0, 10.0, 1.0, 0.5,
+                                              key="dial_bm25")
+        out["vector_weight"] = right.number_input("Vector weight", 0.0, 10.0, 1.0, 0.5,
+                                                  key="dial_vector")
+        st.caption("Weights are each query's boost. Measured: lexical ×3 **cost 5 "
+                   "points** of recall@10. Three separate experiments have now "
+                   "found weighting worse than leaving it alone.")
+
+        out["knn_k"] = st.slider("Vector candidate depth · knn k", 10, 500,
+                                 config.KNN_CANDIDATES, step=10, key="dial_knn")
+        st.caption("Measured: this one is real. At k=50 a chunk BM25 ranked first "
+                   "was unreachable; at k=100 it appeared at rank 7. It sets how "
+                   "much of the corpus the vector channel offers up for fusion.")
+
+        out["top_k"] = st.slider("Evidence budget · chunks sent to the model",
+                                 3, 25, config.TOP_K, key="dial_topk")
+        st.caption("Not a retrieval dial: it decides how much reaches the answer "
+                   "stage. Shrinking it makes rank order matter, which is when the "
+                   "rank constant starts to pay.")
+
+        st.info("The largest measured lever has no control here. Document "
+                "resolution accounts for roughly 25 of the 40 missing points of "
+                "recall@10 — 0.68 resolved against 0.89 with the right document "
+                "forced. That is a correctness problem, not a tuning one.",
+                icon=":material/lightbulb:")
+    return {k: v for k, v in out.items() if v is not None}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def load_catalog():
     return catalog.load_all()
 
@@ -173,15 +239,16 @@ def trace_stats(events: list) -> dict:
 
 
 def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
-            phase: str, model: str, fusion: str = None) -> dict:
+            phase: str, model: str, fusion: str = None, tuning: dict = None) -> dict:
     started = time.perf_counter()
+    overrides = dict(tuning or {})
+    if fusion:
+        overrides["fusion"] = fusion
+    options = replace(phases.get(phase), **overrides) if overrides else phases.get(phase)
     with trace.capture() as events:
         result = runtime.answer_question(
             question["question"], company_catalog(catalog_docs, question["company"]),
-            dictionary_data,
-            options=replace(phases.get(phase), fusion=fusion) if fusion
-            else phases.get(phase),
-            model=model)
+            dictionary_data, options=options, model=model)
         verdict = judge.score(question["question"], question["expected_answer"],
                               result["answer"], model=model)
     stats = trace_stats(events)
@@ -761,16 +828,32 @@ def render_detail(run: dict):
         section("Retrieved evidence", f"{len(result['chunks'])} chunks, in answer order",
                 ":material/find_in_page:")
         if any(c.get("channels") for c in result["chunks"]):
-            st.caption("Reciprocal rank fusion · a chunk both channels rank highly "
-                       "outranks one only a single channel found. Ranks are compared, "
-                       "never raw scores.")
-            st.dataframe([{
-                "Final": i, "Page": c.get("page"), "Type": c.get("type"),
-                "BM25 rank": ((c.get("channels") or {}).get("bm25") or {}).get("rank"),
-                "Vector rank": ((c.get("channels") or {}).get("vector") or {}).get("rank"),
-                "RRF score": c.get("rrf_score"),
-            } for i, c in enumerate(result["chunks"], 1)],
-                hide_index=True, width="stretch")
+            st.caption("A chunk both channels rank highly outranks one only a single "
+                       "channel found. Ranks are compared, never raw scores — that is "
+                       "the whole point of fusing by rank. `Moved` compares against "
+                       "the previous run of this question, so a dial change shows as "
+                       "specific chunks changing place.")
+            previous = st.session_state.get(f"ranks_{q['id']}") or {}
+            rows, current = [], {}
+            for i, c in enumerate(result["chunks"], 1):
+                channels = c.get("channels") or {}
+                key = c.get("id")
+                current[key] = i
+                was = previous.get(key)
+                rows.append({
+                    "Final": i, "Page": c.get("page"), "Type": c.get("type"),
+                    "BM25 rank": (channels.get("bm25") or {}).get("rank"),
+                    "Vector rank": (channels.get("vector") or {}).get("rank"),
+                    "Fused score": round(c.get("rrf_score") or c.get("score") or 0, 6),
+                    "Moved": ("new" if was is None else
+                              "—" if was == i else f"{'↑' if was > i else '↓'}{abs(was - i)}"),
+                })
+            st.dataframe(rows, hide_index=True, width="stretch")
+            dropped = [k for k in previous if k not in current]
+            if previous and (dropped or any(r["Moved"] not in ("—", "new") for r in rows)):
+                st.caption(f"{sum(1 for r in rows if r['Moved'] == 'new')} entered, "
+                           f"{len(dropped)} dropped out since the previous run.")
+            st.session_state[f"ranks_{q['id']}"] = current
         elif any(c.get("score") is not None for c in result["chunks"]):
             # Native fusion returns one blended number and no derivation:
             # SEARCH_META exposes only id and score, and "explain": true adds
@@ -790,9 +873,10 @@ def render_detail(run: dict):
             channels = chunk.get("channels") or {}
             if channels:
                 source = " + ".join(
-                    f"{name} rank {v['rank']} ({v['raw_score']:.4f})"
+                    f"{name} " + (f"rank {v['rank']} " if v.get("rank") else "")
+                    + f"w={v.get('weight', 1)} → {v['contribution']}"
                     for name, v in sorted(channels.items()))
-                source += f" → RRF {chunk.get('rrf_score')}"
+                source += (f" = {chunk.get('rrf_score') or chunk.get('score'):.6f}")
             elif chunk.get("score") is not None:
                 source = f"SEARCH_SCORE() {chunk['score']:.4f}"
             else:
@@ -860,8 +944,10 @@ with st.sidebar:
             "Hybrid fusion", list(FUSION_LABELS), default="score", required=True,
             width="stretch", format_func=lambda f: FUSION_LABELS[f])
         st.caption(FUSION_HELP[fusion])
+        tuning = tuning_panel(fusion)
     else:
         fusion = None
+        tuning = {}
 
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],
                                     default="OpenAI", required=True, width="stretch")
@@ -953,7 +1039,7 @@ if run_clicked:
             status.write(f"{index}/{len(targets)} · {question['id']}")
             try:
                 runs.append(run_one(question, catalog_docs, dictionary_data, phase,
-                                    model, fusion))
+                                    model, fusion, tuning))
             except Exception as exc:
                 status.update(label=f"Run stopped: {exc}", state="error", expanded=True)
                 st.exception(exc)

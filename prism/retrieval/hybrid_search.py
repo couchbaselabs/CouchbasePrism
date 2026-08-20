@@ -51,6 +51,8 @@ by accident: analyze that field with `en` instead and the offset varies per
 document, silently perturbing the leg that is supposed to represent pure
 vector rank.
 """
+import re
+
 from .. import config
 from .. import trace
 from ..couchbase_io import query
@@ -170,11 +172,59 @@ def build_fused_statement(question: str, embedding: list, doc_name: str = None,
     return statement, params
 
 
+# The Search service explains its own fusion when `explain` is on:
+#   "rrf score (weight=1.000, rank=1, rank_constant=60), normalized score of"
+# That is the same arithmetic rrf_merge reports for the in-code path, so parsing
+# it lets both paths show a reader per-channel rank and contribution rather than
+# one opaque number.
+FUSION_NODE = re.compile(
+    r"(rrf|rsf) score \(weight=([\d.]+)"
+    r"(?:,\s*rank=(\d+))?"
+    r"(?:,\s*rank_constant=(\d+))?", re.I)
+VECTOR_FIELD = "text-embedding"
+
+
+def _channel_of(node: dict) -> str:
+    """Which channel a fusion node came from, read from the scoring beneath it."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if VECTOR_FIELD in str(current.get("message", "")):
+            return "vector"
+        stack.extend(current.get("children") or [])
+    return "bm25"
+
+
+def parse_explanation(explanation: dict) -> dict:
+    """{channel: {rank, weight, raw_score, contribution}} from the server's own
+    explanation. Returns {} when fusion is off, since the additive default has no
+    per-channel structure to report."""
+    if not isinstance(explanation, dict):
+        return {}
+    channels, stack = {}, [explanation]
+    while stack:
+        node = stack.pop()
+        match = FUSION_NODE.search(str(node.get("message", "")))
+        if match:
+            _, weight, rank, constant = match.groups()
+            child = (node.get("children") or [{}])[0]
+            channels[_channel_of(node)] = {
+                "rank": int(rank) if rank else None,
+                "weight": float(weight),
+                "rank_constant": int(constant) if constant else None,
+                "raw_score": round(child.get("value") or 0.0, 6),
+                "contribution": round(node.get("value") or 0.0, 6),
+            }
+        stack.extend(node.get("children") or [])
+    return channels
+
+
 def build_native_statement(question: str, embedding: list, doc_name: str = None,
                           anchors: list = None, top_k: int = config.TOP_K,
                           knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
                           concept: str = None, strategy: str = "rrf",
-                          weights: dict = None) -> tuple:
+                          weights: dict = None, rank_constant: int = None,
+                          window_size: int = None) -> tuple:
     """One SEARCH() with the Search service doing the fusion.
 
     Weights are expressed as each query's TOP-LEVEL boost, which is how the
@@ -203,13 +253,15 @@ def build_native_statement(question: str, embedding: list, doc_name: str = None,
            + (f', "boost": {vector_weight}' if vector_weight is not None else "")
            + "}]")
 
+    constant = config.NATIVE_RANK_CONSTANT if rank_constant is None else rank_constant
+    window = max(window_size or config.NATIVE_WINDOW_SIZE, top_k)
     statement = (
-        SELECT_FIELDS + "\n"
+        SELECT_FIELDS + ",\n           SEARCH_META(d) AS meta\n"
         + f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d\n"
         + "WHERE SEARCH(d, {"
-        + f'"score": "{strategy}", '
-        + f'"params": {{"score_rank_constant": {config.NATIVE_RANK_CONSTANT}, '
-          f'"score_window_size": {max(config.NATIVE_WINDOW_SIZE, top_k)}}}, '
+        + f'"score": "{strategy}", "explain": true, '
+        + f'"params": {{"score_rank_constant": {constant}, '
+          f'"score_window_size": {window}}}, '
         + f'"query": {query_clause}, {knn}, "size": {top_k}'
         + f'}}, {{"index": "{config.FTS_DOCS_INDEX}"}})\n'
         + f"ORDER BY SEARCH_SCORE() DESC LIMIT {top_k}"
@@ -276,15 +328,23 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
                   anchors: list = None, top_k: int = config.TOP_K,
                   knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
                   concept: str = None, fusion: str = None,
-                  weights: dict = None) -> list:
+                  weights: dict = None, rank_constant: int = None,
+                  window_size: int = None) -> list:
     """One statement either way. Native fusion returns a single blended
     SEARCH_SCORE(); RRF returns the per-channel derivation as well."""
     mode = fusion or config.HYBRID_FUSION
     if mode in config.NATIVE_STRATEGIES:
         statement, params = build_native_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost,
-            concept, strategy=config.NATIVE_STRATEGIES[mode], weights=weights)
-        return query(statement, params)
+            concept, strategy=config.NATIVE_STRATEGIES[mode], weights=weights,
+            rank_constant=rank_constant, window_size=window_size)
+        rows = query(statement, params)
+        for row in rows:
+            channels = parse_explanation((row.pop("meta", None) or {}).get("explanation"))
+            if channels:
+                row["channels"] = channels
+                row["channel"] = "+".join(sorted(channels))
+        return rows
     if mode == "score":
         statement, params = build_fused_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
@@ -292,4 +352,5 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
 
     statement, params = build_statement(
         question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
-    return rrf_merge(query(statement, params), top_k=top_k, weights=weights)
+    return rrf_merge(query(statement, params), top_k=top_k, weights=weights,
+                     k=rank_constant if rank_constant is not None else RRF_K)
