@@ -134,7 +134,6 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 def tuning_panel(fusion: str) -> dict:
     """Retrieval dials, each labelled with what it was measured to do.
 
