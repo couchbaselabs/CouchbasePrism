@@ -33,10 +33,9 @@ from prism.retrieval.hybrid_search import hybrid_search
 GOLD = pathlib.Path("financebench/data/financebench_open_source.jsonl")
 
 CONFIGS = [
-    ("A sum, no fusion",          {"fusion": "score"}),
+    ("A additive (default)",       {"fusion": "score"}),
     ("B native RRF",              {"fusion": "native-rrf"}),
     ("C native RSF",              {"fusion": "native-rsf"}),
-    ("D native DBSF",             {"fusion": "native-dbsf"}),
     ("E RRF in code",             {"fusion": "rrf"}),
     ("F native RRF, bm25 x3",     {"fusion": "native-rrf",
                                    "weights": {"bm25": 3.0, "vector": 1.0}}),

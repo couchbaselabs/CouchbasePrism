@@ -157,7 +157,13 @@ KNN_CANDIDATES = 200
 # exposes the per-channel breakdown. native-dbsf is measurably WORSE (0.44) and
 # is kept only as the counter-example.
 HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "native-rrf")
-NATIVE_STRATEGIES = {"native-rrf": "rrf", "native-rsf": "rsf", "native-dbsf": "dbsf"}
+# Only rrf and rsf are documented (Bleve v2.5.4 onwards). "dbsf" appears in the
+# internal design document marked [TBD] and is absent from the released docs -
+# the server accepts the value without implementing it, the same validation gap
+# that lets "bogus" through. It measured worst of six configurations (recall@10
+# 0.44 against 0.60-0.85), which is what an unimplemented strategy would look
+# like, so it is not offered.
+NATIVE_STRATEGIES = {"native-rrf": "rrf", "native-rsf": "rsf"}
 # Native equivalents of RRF_K and LEG_CANDIDATES. score_window_size must be >=
 # the requested size, and is the per-channel result set fusion considers.
 NATIVE_RANK_CONSTANT = int(os.environ.get("PRISM_NATIVE_RANK_CONSTANT", 60))

@@ -111,20 +111,19 @@ PHASE_HELP = {
     "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
                 "with binding, deterministic calculation and governance",
 }
-FUSION_LABELS = {"score": "Sum (no fusion)", "native-rrf": "Native RRF",
-                 "native-rsf": "Native RSF", "native-dbsf": "Native DBSF",
-                 "rrf": "RRF in code"}
+FUSION_LABELS = {"score": "Additive (default)", "native-rrf": "Native RRF",
+                 "native-rsf": "Native RSF", "rrf": "RRF in code"}
 FUSION_HELP = {
-    "score": "One SEARCH(), no fusion strategy: the Search service SUMS the lexical "
-             "and vector scores. Nothing to tune, but the two scores are on "
-             "different footings, so a lexical-only hit loses to every vector hit.",
+    "score": "Bleve's default: weighted addition of the lexical and vector scores. "
+             "Sensitive to the two scores being on different scales, so a "
+             "lexical-only hit can lose to every vector hit - but measured equal to "
+             "RRF and RSF on recall over 143 questions.",
     "native-rrf": "Server-side reciprocal rank fusion, 1/(k + rank), one SEARCH(). "
                   "Needs Couchbase 8.1 - on 8.0.1 the score field parsed and was "
                   "silently ignored. Channel weights come from each query's boost.",
-    "native-rsf": "Server-side relative score fusion: normalise each channel's "
-                  "scores into a common range, then combine.",
-    "native-dbsf": "Server-side distribution-based score fusion: normalise using "
-                   "each channel's score distribution rather than its range.",
+    "native-rsf": "Relative score fusion: min-max normalise each channel into "
+                  "[0,1], then add with the query boosts as weights. Keeps score "
+                  "magnitude, but one outlier skews the normalisation.",
     "rrf": "Two SEARCH channels unioned in one statement, fused in application "
            "code. Works on any version, and the only option that reports each "
            "channel's rank and contribution per chunk.",
