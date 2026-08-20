@@ -56,29 +56,95 @@ def _core(name: str) -> str:
     return "".join(kept)
 
 
+def _cores(name: str) -> set:
+    """Every spelling of one identity worth comparing.
+
+    An ampersand is written three ways and readers use all of them: "J&J" is
+    also "JnJ" and "J and J". Dropping the ampersand alone yields JJ, which
+    matches none of the others - the alias was recorded correctly and still
+    failed to match the question. Generated here rather than asked of a model,
+    because it is orthography, not knowledge.
+    """
+    raw = str(name or "").upper()
+    return {c for c in (_core(raw), _core(raw.replace("&", "N")),
+                        _core(raw.replace("&", " AND "))) if c}
+
+
+def _abbreviation_hit(core: str, question: str) -> int:
+    """Length of the longest question word that PREFIXES this subject's core.
+
+    Questions abbreviate what filings spell out: "JPM" for JPMorgan Chase, "MGM"
+    for MGM Resorts International. Those are prefixes of the full name, so they
+    can be matched without knowing anything about the company. Abbreviations that
+    are not prefixes - "JnJ", "AMEX" - are not reachable this way and need
+    recorded aliases.
+
+    Three characters minimum: shorter prefixes collide across issuers.
+    """
+    best = 0
+    for word in re.findall(r"[A-Za-z0-9]{3,}", question.upper()):
+        if core.startswith(word) and len(word) > best:
+            best = len(word)
+    return best
+
+
 def subject_candidates(catalog_docs: list, question: str) -> list:
     """Documents whose subject the question names. Empty when nothing matches,
     so the caller can decide - silently falling back to the whole catalog is how
     an Adobe question came to be answered from a 3M filing.
 
     Longest match wins: "AMERICANWATERWORKS" must beat "AMERICAN" if both are
-    present, or a question about one issuer resolves to another.
+    present, or a question about one issuer resolves to another. A full-name
+    match always beats an abbreviation, since an abbreviation is weaker evidence.
     """
-    asked = _core(question)
+    asked = "|".join(sorted(_cores(question)))
     if not asked:
         return []
     best, matched = 0, []
     for doc in catalog_docs:
-        for signal in (doc.get("company"), (doc.get("doc_name") or "").split("_")[0]):
-            core = _core(signal)
-            if len(core) < 2 or core not in asked:
-                continue
-            if len(core) > best:
-                best, matched = len(core), [doc]
-            elif len(core) == best and doc not in matched:
-                matched.append(doc)
-            break
+        signals = [doc.get("company"), (doc.get("doc_name") or "").split("_")[0]]
+        signals += list(doc.get("aliases") or [])
+        score = 0
+        for signal in signals:
+            for core in _cores(signal):
+                if len(core) < 2:
+                    continue
+                if core in asked:
+                    # Full name present: scored above any abbreviation of it.
+                    score = max(score, len(core) + 100)
+                else:
+                    score = max(score, _abbreviation_hit(core, question))
+        if not score:
+            continue
+        if score > best:
+            best, matched = score, [doc]
+        elif score == best and doc not in matched:
+            matched.append(doc)
     return matched
+
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"], 1)}
+
+
+def event_date_from_question(question: str):
+    """An explicit calendar date the question names, as ISO, or None.
+
+    Several questions ask about a specific filing: "the 8k filing dated 1st July
+    2022", "the separation announced August 30, 2023". A report filed on a date
+    is a different document from the annual report covering that year, and the
+    date is the only thing distinguishing them.
+    """
+    text = (question or "").lower()
+    for pattern in (r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+),?\s+(\d{4})\b",
+                    r"\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b"):
+        for match in re.finditer(pattern, text):
+            a, b, year = match.groups()
+            day, month = (a, _MONTHS.get(b)) if a.isdigit() else (b, _MONTHS.get(a))
+            if month:
+                return f"{int(year):04d}-{month:02d}-{int(day):02d}"
+    return None
 
 
 def period_from_question(question: str):
@@ -104,14 +170,28 @@ def resolve(catalog_docs: list, year, quarter) -> str:
     if quarter is not None:
         quarterly = [d for d in matches if form_of(d.get("doc_type")) == "10-Q"]
         if quarterly:
-            return quarterly[0]["doc_name"]
+            # The quarter was parsed and then ignored: quarterly[0] returned the
+            # first 10-Q of the year whatever quarter was asked for, so "2022 Q2"
+            # answered from Q1. Fiscal quarters do not map to fixed months across
+            # issuers, but the year's 10-Qs in date order ARE Q1, Q2, Q3.
+            quarterly.sort(key=lambda d: d.get("period_end_date_iso") or "")
+            return quarterly[min(quarter, len(quarterly)) - 1]["doc_name"]
     annual = [d for d in matches if form_of(d.get("doc_type")) == "10-K"]
     return (annual[0] if annual else matches[0])["doc_name"]
 
 
 def resolve_for_question(catalog_docs: list, question: str) -> str:
-    """Subject first, then period. A question naming no known subject falls back
-    to the whole catalog, which is right for a single-subject corpus and is the
-    caller's problem to notice otherwise."""
+    """Subject, then a named date if there is one, then period.
+
+    A named date outranks the period because it is more specific: a question
+    about what was filed on 30 August 2023 is not asking about the annual report
+    for 2023, even though both match the year.
+    """
     scoped = subject_candidates(catalog_docs, question) or catalog_docs
+    on_date = event_date_from_question(question)
+    if on_date:
+        dated = [d for d in scoped if on_date in (d.get("doc_name") or "")
+                 or on_date == d.get("period_end_date_iso")]
+        if dated:
+            return dated[0]["doc_name"]
     return resolve(scoped, *period_from_question(question))

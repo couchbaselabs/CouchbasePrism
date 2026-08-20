@@ -56,6 +56,36 @@ def build_catalog(args):
             print(f"  [{i}/{len(docs)}] {doc_name}: ERROR {e}", file=sys.stderr)
 
 
+def add_aliases(args):
+    """Once per company, not per document: 40 model calls cover 354 documents."""
+    names = catalog.companies()
+    if not names:
+        sys.exit("catalog has no companies; build it first")
+    print(f"proposing aliases for {len(names)} companies", file=sys.stderr)
+    for i, company in enumerate(names, 1):
+        aliases = catalog.propose_aliases(company, model=args.model)
+        updated = catalog.set_aliases(company, aliases) if aliases else 0
+        print(f"  [{i}/{len(names)}] {company}: {aliases or '(none)'} "
+              f"-> {updated} document(s)", file=sys.stderr)
+
+
+def backfill_periods(args):
+    """Recompute doc_period from data already in the catalog - no re-extraction.
+    Applies the 52/53-week fiscal-year rule and the document-name fallback."""
+    fixed = 0
+    for row in catalog.all_periods():
+        name, current = row["doc_name"], row.get("doc_period")
+        iso = row.get("period_end_date_iso")
+        wanted, source = catalog.fiscal_year(iso), "fiscal_year_of_period_end"
+        if wanted is None:
+            wanted, source = catalog.period_from_doc_name(name), "document_name"
+        if wanted is not None and wanted != current:
+            catalog.set_period(name, wanted, source)
+            print(f"  {name}: {current} -> {wanted}  ({source})", file=sys.stderr)
+            fixed += 1
+    print(f"updated {fixed} catalog document(s)", file=sys.stderr)
+
+
 def approve(args):
     dictionary.approve(args.concept, args.formula, args.healthy_at_or_above)
     print(f"approved {args.concept!r}: {args.formula}"
@@ -118,6 +148,13 @@ def main():
     b.add_argument("--company", default=None)
     b.add_argument("--model", default=None)
     b.set_defaults(func=build_catalog)
+
+    bp = sub.add_parser("backfill-periods")
+    bp.set_defaults(func=backfill_periods)
+
+    al = sub.add_parser("add-aliases")
+    al.add_argument("--model", default=None)
+    al.set_defaults(func=add_aliases)
 
     a = sub.add_parser("approve")
     a.add_argument("concept")

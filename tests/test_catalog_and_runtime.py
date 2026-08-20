@@ -259,3 +259,53 @@ def test_longer_subject_match_wins():
              "doc_type": "10-K", "period_end_date_iso": "2022-12-31"}]
     assert catalog.resolve_for_question(docs, "American Water Works 2022 revenue?") \
         == "AMERICANWATERWORKS_2022_10K"
+
+
+# ------------------------------------------------ period and form selection
+
+def test_fiscal_year_handles_a_52_week_year_end():
+    # Johnson & Johnson's fiscal 2022 ended 1 January 2023. Labelling it 2023
+    # made every FY2022 question miss. Best Buy's fiscal 2023 ended 28 January
+    # 2023 and IS labelled 2023, so only the first week of January adjusts.
+    assert catalog.fiscal_year("2023-01-01") == 2022
+    assert catalog.fiscal_year("2023-01-28") == 2023
+    assert catalog.fiscal_year("2023-06-30") == 2023
+    assert catalog.fiscal_year("2022-12-31") == 2022
+    assert catalog.fiscal_year(None) is None
+
+
+def test_period_falls_back_to_the_document_name():
+    # 8-Ks and earnings releases state no fiscal period, so they never matched a
+    # period-bearing question and a 10-K won by default.
+    assert catalog.period_from_doc_name("AMCOR_2022_8K_dated-2022-07-01") == 2022
+    assert catalog.period_from_doc_name("JOHNSON_JOHNSON_2022Q4_EARNINGS") == 2022
+    assert catalog.period_from_doc_name("no_year_here") is None
+
+
+def test_the_requested_quarter_selects_the_matching_10Q():
+    # The quarter was parsed and then discarded: the first 10-Q of the year was
+    # returned whatever quarter was asked for, so "2022 Q2" answered from Q1.
+    docs = [{"doc_name": f"X_2022Q{q}_10Q", "doc_type": "10-Q", "doc_period": 2022,
+             "period_end_date_iso": f"2022-{3 * q:02d}-30"} for q in (1, 2, 3)]
+    assert catalog.resolve(docs, 2022, 2) == "X_2022Q2_10Q"
+    assert catalog.resolve(docs, 2022, 3) == "X_2022Q3_10Q"
+
+
+def test_a_named_date_outranks_the_period():
+    # "filed on 30 August 2023" is not asking for the 2023 annual report, even
+    # though both match the year.
+    docs = [{"doc_name": "X_2023_10K", "doc_type": "10-K", "doc_period": 2023,
+             "period_end_date_iso": "2023-12-31"},
+            {"doc_name": "X_2023_8K_dated-2023-08-30", "doc_type": "8-K",
+             "doc_period": 2023, "period_end_date_iso": None}]
+    assert catalog.resolve_for_question(docs, "What did X report on August 30, 2023?") \
+        == "X_2023_8K_dated-2023-08-30"
+    assert catalog.resolve_for_question(docs, "What were X's FY2023 revenues?") \
+        == "X_2023_10K"
+
+
+def test_dates_are_read_in_either_order():
+    assert catalog.event_date_from_question("the 8k filing dated 1st July 2022") \
+        == "2022-07-01"
+    assert catalog.event_date_from_question("announced on August 30, 2023") == "2023-08-30"
+    assert catalog.event_date_from_question("in FY2022") is None

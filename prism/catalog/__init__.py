@@ -10,10 +10,15 @@ semantic search happens.
 from .extraction import (  # noqa: F401
     CLASSIFY_SYSTEM_PROMPT, COVER_PAGES, FIELDS,
     apply_grounding_check, build_document, build_from_pdf, classify_cover,
-    cover_text, to_iso_date, year_of,
+    cover_text, fiscal_year, period_from_doc_name, to_iso_date, year_of,
 )
-from .repository import ingested_doc_names, ensure_index, load_all, upsert  # noqa: F401
+from .aliases import ALIAS_SYSTEM_PROMPT, propose_aliases  # noqa: F401
+from .repository import (  # noqa: F401
+    all_periods, companies, ensure_index, ingested_doc_names, load_all,
+    set_aliases, set_period, upsert,
+)
 from .resolver import (  # noqa: F401
-    form_of, period_from_question, resolve, resolve_for_question,
+    event_date_from_question, form_of, period_from_question, resolve,
+    resolve_for_question,
     subject_candidates,
 )  # noqa: F401

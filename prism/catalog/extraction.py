@@ -98,6 +98,41 @@ def to_iso_date(date_str: str):
     return None
 
 
+_NAME_PERIOD = re.compile(r"_((?:19|20)\d{2})")
+
+
+def period_from_doc_name(doc_name: str):
+    """A period for documents whose cover page states none.
+
+    8-Ks and earnings releases carry no "for the fiscal year ended" line, so
+    extraction leaves doc_period empty and they never match a period-bearing
+    question - a 10-K wins by default. 12 of the FinanceBench resolution
+    failures were exactly this. The document name carries the year, so it is used
+    as a fallback and recorded as such.
+    """
+    match = _NAME_PERIOD.search(doc_name or "")
+    return int(match.group(1)) if match else None
+
+
+def fiscal_year(iso_date: str):
+    """The fiscal year a period-end date belongs to.
+
+    Companies on a 52/53-week calendar end the year on the weekday nearest 31
+    December, which can fall in the first days of January: Johnson & Johnson's
+    fiscal 2022 ended 1 January 2023. Taking the calendar year of that date
+    labels it 2023 and every FY2022 question misses.
+
+    Only the first week of January is adjusted. Retailers ending late January
+    label the year by the calendar year it ends in - Best Buy's fiscal 2023
+    ended 28 January 2023 - so a broader rule would break them, and a
+    fiscal year ending in June is labelled by its ending year too.
+    """
+    if not iso_date or len(iso_date) < 10:
+        return None
+    year, month, day = int(iso_date[:4]), int(iso_date[5:7]), int(iso_date[8:10])
+    return year - 1 if month == 1 and day <= 7 else year
+
+
 def build_document(doc_name: str, extraction: dict,
                    gics_sector: str = None) -> dict:
     """Only the fields something actually reads.
@@ -117,7 +152,8 @@ def build_document(doc_name: str, extraction: dict,
         "doc_type": extraction.get("doc_type"),
         "period_end_date": period,
         "period_end_date_iso": to_iso_date(raw),
-        "doc_period": year_of(raw),
+        "doc_period": (fiscal_year(to_iso_date(raw))
+                       or period_from_doc_name(doc_name)),
         "lineage": {
             "extractor": "pymupdf-sort+closed-set-classification",
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

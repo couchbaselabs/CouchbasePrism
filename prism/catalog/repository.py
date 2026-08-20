@@ -16,9 +16,45 @@ def load_all() -> list:
     must be backticked in the projection."""
     return query(
         "SELECT d.doc_name, d.doc_type.`value` AS doc_type, d.doc_period, "
-        "d.period_end_date_iso, d.company.`value` AS company, d.gics_sector "
+        "d.period_end_date_iso, d.company.`value` AS company, d.gics_sector, "
+        "d.aliases "
         f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d"
     )
+
+
+def companies() -> list:
+    """Distinct extracted company names in the catalog, for work that is per
+    company rather than per document."""
+    rows = query(
+        "SELECT DISTINCT d.company.`value` AS company "
+        f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d "
+        "WHERE d.company.`value` IS NOT MISSING")
+    return sorted({r["company"] for r in rows if r.get("company")})
+
+
+def set_aliases(company: str, aliases: list) -> int:
+    """Attach aliases to every catalog document for one company. Returns the
+    number of documents updated."""
+    rows = query(
+        f"UPDATE `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d "
+        "SET d.aliases = $aliases, d.lineage.aliases = 'model_proposed' "
+        "WHERE d.company.`value` = $company RETURNING d.doc_name",
+        {"$aliases": aliases, "$company": company})
+    return len(rows)
+
+
+def set_period(doc_name: str, period: int, source: str) -> None:
+    query(
+        f"UPDATE `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d "
+        "SET d.doc_period = $period, d.lineage.doc_period = $source "
+        "WHERE d.doc_name = $doc_name",
+        {"$period": period, "$source": source, "$doc_name": doc_name})
+
+
+def all_periods() -> list:
+    return query(
+        "SELECT d.doc_name, d.doc_period, d.period_end_date_iso "
+        f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d")
 
 
 def ingested_doc_names() -> set:
