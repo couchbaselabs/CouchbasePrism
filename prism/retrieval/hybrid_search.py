@@ -69,18 +69,30 @@ SELECT_FIELDS = """SELECT META(d).id AS id,
            SEARCH_SCORE() AS score"""
 
 
+def _merged_terms(concept: str, anchors: list) -> str:
+    """Concept + every anchor, lowercased, hyphens/slashes/punctuation split
+    into word breaks, deduped, and joined into one bag of words for a single
+    OR match - rather than requiring each anchor to appear as a verbatim
+    phrase, which most of the planner's anchors never do."""
+    seen = []
+    for text in [concept or ""] + list(anchors or []):
+        cleaned = re.sub(r"[^a-z0-9]+", " ", text.lower())
+        for word in cleaned.split():
+            if word not in seen:
+                seen.append(word)
+    return " ".join(seen)
+
+
 def _lexical_clause(question: str, anchors: list, concept: str,
                     title_boost: float, params: dict) -> str:
     """The disjuncts BM25 scores against. Falls back to the question text only
     when there is nothing better, so the leg never drops out entirely."""
     disjuncts = []
-    if concept:
-        disjuncts.append('{"match": $concept, "field": "text-to-embed", '
-                         '"operator": "and"}')
-        params["$concept"] = concept
-    for i, anchor in enumerate(anchors or []):
-        disjuncts.append(f'{{"match_phrase": $a{i}, "field": "text-to-embed"}}')
-        params[f"$a{i}"] = anchor
+    terms = _merged_terms(concept, anchors)
+    if terms:
+        disjuncts.append('{"match": $terms, "field": "text-to-embed", '
+                         '"operator": "or"}')
+        params["$terms"] = terms
     if not disjuncts:
         disjuncts.append('{"match": $match_text, "field": "text-to-embed"}')
         params["$match_text"] = question
