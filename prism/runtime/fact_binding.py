@@ -105,17 +105,26 @@ def validate_bindings(bound: list, chunks: list) -> list:
                     issues.append(f"value {value} not found verbatim in retrieved text")
         if not fact.get("period"):
             issues.append("no period/column bound")
-        else:
+        # A fact whose own name already names a fiscal year (total_assets_fy2021)
+        # is INTENTIONALLY a different period from its siblings - that is the
+        # whole reason a formula needing an average across years asks for two
+        # separately-named facts instead of one. Only facts without a year
+        # baked into the name go into the "should all agree" set; ROA's
+        # net_income was getting invalidated by total_assets_fy2021 disagreeing
+        # with total_assets_fy2022, which is not a binding error.
+        elif not re.search(r"fy\d{4}", fact.get("name") or "", re.I):
             periods.setdefault(fact["period"], []).append(fact.get("name"))
         fact["grounded"] = not issues
         fact["binding_issues"] = issues
 
     if len(periods) > 1:
         # Facts drawn from different columns produce a number that is wrong in a
-        # way no arithmetic check can detect, so the whole set is rejected.
+        # way no arithmetic check can detect, so the whole set is rejected -
+        # excluding facts whose name already declared which period they want.
         for fact in bound:
-            fact["binding_issues"].append(f"facts bound to mixed periods: {sorted(periods)}")
-            fact["grounded"] = False
+            if not re.search(r"fy\d{4}", fact.get("name") or "", re.I):
+                fact["binding_issues"].append(f"facts bound to mixed periods: {sorted(periods)}")
+                fact["grounded"] = False
     return bound
 
 
