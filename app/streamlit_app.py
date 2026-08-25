@@ -90,22 +90,32 @@ st.html("""
 """)
 MODEL_OPTIONS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5",
                  "gpt-4.1-mini", "gpt-4o-mini"]
-# Roles, not call sites - see prism.config.STAGE_ROLE. Binding sits with answer
-# rather than utility because choosing the wrong column is not a tagging error.
+# Roles, not call sites - see prism.config.STAGE_ROLE. Listed in the order
+# they first appear in the pipeline trace below (steps 1/2/4/5/7/8), not
+# alphabetically or by cost. "Classification" used to sit third in an
+# unordered list, right after "Binding + answer", and looked like it ran
+# after the answer stage. It doesn't: per-question document resolution is
+# deterministic code, not an LLM call, and catalog field extraction is an
+# ingestion-time job - this role rarely appears in a single question's trace
+# at all. Descriptions below cite the trace step number so the two panels
+# read as one pipeline instead of two different orderings.
 MODEL_ROLES = [
+    ("utility", "Catalog matching", "gpt-5.4",
+     "Step 1 (Filter), mostly at ingestion: extracted company, form and period "
+     "across 354 documents without a failure. Also covers anchor repair, off "
+     "by default. Cheap and high volume."),
     ("planner", "Planner", "gpt-5.4",
-     "Evidence plan and candidate calculation conventions - proposes structure "
-     "it cannot verify."),
-    ("answer", "Binding + answer", "gpt-5.5",
-     "Binds facts to rows and columns, then writes the answer. Errors here are "
-     "wrong numbers in front of a reader."),
-    ("utility", "Classification", "gpt-5.4",
-     "Catalog field extraction and anchor repair. Cheap and high volume - it "
-     "extracted company, form and period across 354 documents without a failure."),
+     "Steps 2 (Plan) and 4 (Govern): the evidence plan, and - only when "
+     "nothing approved matches - candidate calculation conventions. Proposes "
+     "structure it cannot verify."),
+    ("answer", "Bind + answer", "gpt-5.4",
+     "Steps 5 (Bind) and 7 (Answer): binds facts to rows and columns, then "
+     "writes the answer. Errors here are wrong numbers in front of a reader."),
     ("judge", "Evaluation judge", "gpt-5.4",
-     "Grades the answer against the benchmark reference. Evaluation only, never "
-     "part of an answer path. Keep it OFF the answer model: a model grading its "
-     "own output is how gpt-5.5 came to look worse than gpt-5.4."),
+     "Step 8 (Evaluate): grades the answer against the benchmark reference. "
+     "Evaluation only, never part of an answer path. Keep it OFF the answer "
+     "model: a model grading its own output is how gpt-5.5 came to look "
+     "worse than gpt-5.4."),
 ]
 PHASE_HELP = {
     "1-vector": "Textbook RAG · kNN across the whole corpus, no scoping",
