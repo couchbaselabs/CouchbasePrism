@@ -87,12 +87,22 @@ def validate_bindings(bound: list, chunks: list) -> list:
         if value is None:
             issues.append("no value bound")
         else:
-            n = abs(float(value))
-            printed = f"{n:,.0f}" if float(n).is_integer() else f"{n:,}"
-            # Filings print 15,754 / (1,749) / 15754 - accept any of those.
-            if not any(v in haystack for v in
-                       {printed, printed.replace(",", ""), f"{n:g}"}):
-                issues.append(f"value {value} not found verbatim in retrieved text")
+            try:
+                n = abs(float(value))
+            except (TypeError, ValueError):
+                # The prompt asks for a bare number; nothing enforces it. A
+                # dense multi-row table (e.g. several segments sharing a page)
+                # is exactly where the model can bind a row label instead of
+                # its value. One bad fact should not crash the whole batch -
+                # it degrades to ungrounded like any other failed check.
+                issues.append(f"value {value!r} is not numeric")
+                n = None
+            if n is not None:
+                printed = f"{n:,.0f}" if float(n).is_integer() else f"{n:,}"
+                # Filings print 15,754 / (1,749) / 15754 - accept any of those.
+                if not any(v in haystack for v in
+                           {printed, printed.replace(",", ""), f"{n:g}"}):
+                    issues.append(f"value {value} not found verbatim in retrieved text")
         if not fact.get("period"):
             issues.append("no period/column bound")
         else:
