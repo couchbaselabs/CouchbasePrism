@@ -660,7 +660,7 @@ def render_batch(runs: list, company: str, phase: str, model: str):
             bottom[1].metric("Total time", f"{total_seconds:.1f}s", icon=":material/timer:")
             bottom[2].metric("Avg latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
 
-    st.markdown(results_table_html(runs), unsafe_allow_html=True)
+    st.html(results_table_html(runs))
     st.caption("Pass means convergence with FinanceBench's chosen convention, not an "
                "assertion that other defensible conventions are objectively wrong.")
 
