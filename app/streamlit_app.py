@@ -165,9 +165,9 @@ def tuning_panel(fusion: str) -> dict:
                    "Must be at least the evidence budget.")
 
         left, right = st.columns(2)
-        out["bm25_weight"] = left.number_input("Lexical weight", 0.0, 10.0, 1.0, 0.5,
+        out["bm25_weight"] = left.number_input("Lexical weight", 0.0, 10.0, 1.0, 0.10,
                                                key="dial_bm25")
-        out["vector_weight"] = right.number_input("Vector weight", 0.0, 10.0, 1.0, 0.5,
+        out["vector_weight"] = right.number_input("Vector weight", 0.0, 10.0, 1.0, 0.10,
                                                   key="dial_vector")
         st.caption("Each channel's relative importance, written into the statement "
                    "as that query's boost. Equal weights mean neither is favoured.")
