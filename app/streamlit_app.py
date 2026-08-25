@@ -597,6 +597,15 @@ RESULT_COLUMNS = [
 ]
 
 
+def _md_bold(text: str) -> str:
+    """Escape first, then turn **bold** into <strong> - the one bit of the LLM's
+    own markdown this table renders. st.html() does not run a markdown parser
+    (that was the source of the leaked-tag bug this replaced), so **emphasis**
+    from an answer or judge comment would otherwise show as literal asterisks
+    instead of being dropped silently or corrupting tags."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html.escape(text))
+
+
 def results_table_html(runs: list) -> str:
     header = "".join(f"<th>{html.escape(name)}</th>" for name, _ in RESULT_COLUMNS)
     cols = "".join(f'<col style="width:{width}">' for _, width in RESULT_COLUMNS)
@@ -610,10 +619,10 @@ def results_table_html(runs: list) -> str:
             f'<td><span class="prism-pill" style="background:{colour}">{label}</span>'
             f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
             f'{html.escape(q["id"].replace("financebench_id_", "#"))}</div></td>',
-            f'<td>{html.escape(q["question"])}</td>',
-            f'<td>{html.escape(q["expected_answer"])}</td>',
-            f'<td>{html.escape(result["answer"])}</td>',
-            f'<td>{html.escape(verdict.get("comment") or "")}</td>',
+            f'<td>{_md_bold(q["question"])}</td>',
+            f'<td>{_md_bold(q["expected_answer"])}</td>',
+            f'<td>{_md_bold(result["answer"])}</td>',
+            f'<td>{_md_bold(verdict.get("comment") or "")}</td>',
             f'<td class="prism-doc">{html.escape(result["resolved_doc"] or "unscoped")}'
             f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
             f'{run["stats"]["total_tokens"]:,} tok · '
