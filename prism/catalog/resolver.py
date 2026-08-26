@@ -152,9 +152,18 @@ def period_from_question(question: str):
     m = re.search(r"\bQ([1-4])\b", question, re.IGNORECASE)
     if m:
         quarter = int(m.group(1))
-    m = (re.search(r"\bFY\s*(\d{4})\b", question, re.IGNORECASE)
-         or re.search(r"\b(20\d{2})\b", question))
-    return (int(m.group(1)) if m else None), quarter
+    # A question spanning two periods ("FY2015 to FY2016", "between FY2021
+    # and FY2022") is asking about CHANGE - the right source is the LATER
+    # period's filing, since a 10-K/10-Q reports its period alongside the
+    # prior one as a comparative column. Taking re.search's first match sent
+    # an Adobe "FY2015 to FY2016" question to the 2015 10-K, which has no
+    # FY2016 column to compare against at all - resolved to a real document,
+    # confidently, just the wrong one. Prefer the latest year mentioned;
+    # single-year questions are unaffected since max() of one value is itself.
+    fy_years = [int(y) for y in re.findall(r"\bFY\s*(\d{4})\b", question, re.IGNORECASE)]
+    bare_years = [int(y) for y in re.findall(r"\b(20\d{2})\b", question)]
+    years = fy_years or bare_years
+    return (max(years) if years else None), quarter
 
 
 def resolve(catalog_docs: list, year, quarter) -> str:
