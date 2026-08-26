@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from .. import catalog, config, dictionary, retrieval
 from .answer import synthesize
-from .calculation import compute, propose_candidates
+from .calculation import candidate_facts, compute, propose_candidates
 from .fact_binding import bind_facts, grounded_facts, to_identifier, validate_bindings
 from .validation import validate_conclusion
 
@@ -112,6 +112,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
             planned = [to_identifier(f) for f in retrieval.fact_ids(plan)]
             if entry:
                 needed = set(entry["interpretation"]["required_facts"])
+                fact_specs = {fid: {"id": fid} for fid in needed}
             else:
                 # Propose FIRST, then bind the union of what the plan asked for
                 # and what the candidates reference. The planner under-specifies:
@@ -119,11 +120,26 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                 # correct formula with an unbound name and nothing computable.
                 candidates, rejected = propose_candidates(
                     plan.get("concept", ""), question, plan, model=model)
+                # candidate_facts() carries each fact's own metadata (anchors,
+                # period_role) rather than collapsing everything to bare ids -
+                # a formula needing the same quantity from two years names two
+                # facts and tags each with which period it is, so validation
+                # can trust that instead of guessing from the id later.
+                fact_specs = {to_identifier(f["id"]): {**f, "id": to_identifier(f["id"])}
+                             for f in retrieval.plan_facts(plan) if f.get("id")}
+                for fact in candidate_facts(candidates):
+                    fact_specs.setdefault(fact["id"], fact)
                 needed = set(planned)
                 for candidate in candidates:
-                    needed |= retrieval.formula_identifiers(candidate.get("formula", ""))
-            bound = validate_bindings(
-                bind_facts(question, sorted(needed), chunks, model=model), chunks)
+                    for ident in retrieval.formula_identifiers(candidate.get("formula", "")):
+                        needed.add(ident)
+                        fact_specs.setdefault(ident, {"id": ident})
+            raw_bound = bind_facts(question, sorted(needed), chunks, model=model)
+            for fact in raw_bound:
+                role = fact_specs.get(fact.get("name"), {}).get("period_role")
+                if role:
+                    fact["period_role"] = role
+            bound = validate_bindings(raw_bound, chunks)
             calc = compute(entry, candidates, grounded_facts(bound))
             conclusion = validate_conclusion(calc["computed"], policy)
 
