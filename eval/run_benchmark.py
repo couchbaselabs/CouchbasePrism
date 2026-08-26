@@ -8,6 +8,7 @@ they are just what the dictionary happens to contain. That is the two-pass
 demo: run, approve one entry, run again, compare.
 """
 import argparse
+import dataclasses
 import json
 import pathlib
 import sys
@@ -27,6 +28,13 @@ def main():
                     choices=sorted(phases.PHASES),
                     help="which capabilities are active; see eval/phases")
     ap.add_argument("--model", default=None)
+    # Retrieval tuning overrides - phases.get() returns a fixed PipelineOptions,
+    # so these only take effect when explicitly passed; omitting them leaves
+    # the phase's own defaults untouched.
+    ap.add_argument("--fusion", default=None,
+                    help="e.g. native-rsf, native-rrf, score, rrf")
+    ap.add_argument("--bm25-weight", type=float, default=None)
+    ap.add_argument("--vector-weight", type=float, default=None)
     ap.add_argument("--out", default="out/benchmark.json")
     args = ap.parse_args()
 
@@ -37,8 +45,17 @@ def main():
     approved = sum(1 for e in dictionary_data.get("entries", [])
                    if e.get("governance", {}).get("status") == "approved")
     options = phases.get(args.phase)
+    overrides = {k: v for k, v in {
+        "fusion": args.fusion,
+        "bm25_weight": args.bm25_weight,
+        "vector_weight": args.vector_weight,
+    }.items() if v is not None}
+    if overrides:
+        options = dataclasses.replace(options, **overrides)
     print(f"corpus={corpus.NAME} phase={args.phase} questions={len(questions)} "
-          f"catalog={len(catalog_docs)} approved_entries={approved}", file=sys.stderr)
+          f"catalog={len(catalog_docs)} approved_entries={approved} "
+          f"model={args.model or '(role defaults)'} overrides={overrides or '(none)'}",
+          file=sys.stderr)
 
     results = []
     for i, q in enumerate(questions, 1):
