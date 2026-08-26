@@ -31,9 +31,15 @@ COMPUTED_ANSWER_PROMPT = (
     "not take that option when a value has been computed - report the value.\n\n"
     "If the computed block states a VERDICT, state that conclusion directly. If it says "
     "the verdict was DECLINED for lack of an approved interpretation policy, report the "
-    "value and say plainly that characterising it (healthy/unhealthy, high/low) requires "
-    "an approved threshold that does not exist yet - and do not supply your own "
-    "threshold. If it says the verdict is BLOCKED, report the candidates and say the "
+    "value and say plainly that characterising IT (healthy/unhealthy, high/low, stable/"
+    "unstable) against a threshold requires an approved policy that does not exist yet - "
+    "and do not supply your own threshold for the computed value. This restriction is "
+    "about the computed value only, not about the excerpts: if an excerpt directly and "
+    "explicitly states its own qualitative characterization or historical pattern (for "
+    "example, a filing stating it has raised a dividend for a stated number of consecutive "
+    "years), report that as a grounded, cited fact and let it answer the question's "
+    "qualitative framing - that is the source's own characterization, not one you "
+    "invented. If it says the verdict is BLOCKED, report the candidates and say the "
     "conventions disagree.\n\n"
     "Cite excerpts by [number] where they support the narrative."
 )
@@ -53,7 +59,10 @@ def render_computed_block(calc: dict, conclusion: dict) -> str:
                      f"{conclusion['explanation']}")
     elif status == "no_policy":
         lines.append("VERDICT DECLINED: no approved interpretation policy exists for this "
-                     "concept, so no characterisation is authorised.")
+                     "concept, so THESE COMPUTED VALUES may not be characterised against a "
+                     "threshold you invent. This does not restrict the excerpts themselves - "
+                     "if they directly state their own qualitative characterization, report "
+                     "it and let it answer the question.")
     elif status == "conflicting":
         lines.append("VERDICT BLOCKED: candidate conventions disagree on which side of "
                      "the approved threshold this falls.")
