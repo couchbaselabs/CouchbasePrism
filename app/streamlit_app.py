@@ -48,8 +48,16 @@ st.html("""
     margin-left: 0.5rem !important;
     margin-right: auto !important;
 
-    /* REDUCE MAIN PANEL TOP SPACING (Adjust 1.5rem as needed) */
-    padding-top: 1.5rem !important;
+    /* Streamlit's own header is fixed-position, z-index 999990, and really is
+       3.75rem tall (measured: 48.75px at this app's 13px root font-size) -
+       ANY padding-top below that lets content slide underneath it rather
+       than sit below it. 1.5rem was invisible as a bug until today: nothing
+       had ever been the literal first element in the main body before the
+       tabs added for the doc workbench, so nothing had tested this edge
+       before. Verified live (not by eye - a partial overlap is invisible in
+       a screenshot): getBoundingClientRect() on the header vs the first
+       child, not guessed. Keep this at or above 3.75rem. */
+    padding-top: 3.9rem !important;
 
     padding-left: clamp(0.75rem, 1.4vw, 1.5rem) !important;
     padding-right: clamp(0.75rem, 1.4vw, 1.5rem) !important;
@@ -1099,7 +1107,91 @@ with st.sidebar:
     st.space("medium")
     fts_sidebar()
 
-with st.expander(":material/find_in_page: Document workbench", expanded=False):
+if custom_question.strip():
+    # No FinanceBench reference exists for a question nobody wrote a gold
+    # answer for - expected_answer is a display string, not data judge.score
+    # runs against; run_one() checks question["id"] == "custom" and skips
+    # scoring entirely rather than judging against this placeholder text.
+    selected_question = {
+        "id": "custom", "question": custom_question.strip(), "doc_name": None,
+        "expected_answer": "— (custom question, no benchmark reference)",
+        "company": company,
+    }
+else:
+    selected_question = None if selection == "All questions" else company_questions[
+        labels.index(selection) - 1
+    ]
+
+# Switching the company, the question, or editing the custom-question box
+# should clear whatever an EARLIER selection produced - a stale answer sitting
+# under a newly-chosen question reads as if it belongs to it. This runs before
+# the prompt-card so a changed selection shows only the question + Run button
+# on the very same rerun the widget change already triggers; it does not fire
+# on the rerun a button click itself causes, since the identity below is
+# unchanged from the run immediately before that click.
+selection_key = (company, selection, custom_question.strip())
+if st.session_state.get("last_selection_key") != selection_key:
+    st.session_state.pop("showcase_runs", None)
+    st.session_state["last_selection_key"] = selection_key
+
+tab_ask, tab_workbench = st.tabs(
+    [":material/chat: Ask a question", ":material/find_in_page: Document workbench"])
+
+with tab_ask:
+    with st.container(border=True, key="prompt-card"):
+        prompt_area, action_area = st.columns([8, 1.25], vertical_alignment="center",
+                                              gap="medium")
+        with prompt_area:
+            st.caption("Selected question" if selected_question else "Benchmark run")
+            if selected_question:
+                st.markdown(f"#### {selected_question['question']}")
+                if selected_question["id"] == "custom":
+                    st.caption("Custom question · not scored — doc resolution runs "
+                              "normally, there is just no reference to grade against")
+                else:
+                    st.caption(f"{selected_question['id']} · expected document: "
+                              f"{selected_question['doc_name']}")
+            else:
+                st.markdown(f"#### Run all {len(company_questions)} {company} questions")
+                st.caption("The results dashboard will compare FinanceBench and PRISM answers.")
+        with action_area:
+            run_label = "Run all" if selected_question is None else "Run trace"
+            run_clicked = st.button(run_label, type="primary", icon=":material/play_arrow:",
+                                    width="stretch", disabled=provider != "OpenAI")
+
+    if run_clicked:
+        targets = company_questions if selected_question is None else [selected_question]
+        runs = []
+        with st.status(f"Running {len(targets)} question{'s' if len(targets) != 1 else ''}…",
+                       expanded=True) as status:
+            for index, question in enumerate(targets, 1):
+                status.write(f"{index}/{len(targets)} · {question['id']}")
+                try:
+                    runs.append(run_one(question, catalog_docs, dictionary_data, phase,
+                                        model, fusion, tuning))
+                except Exception as exc:
+                    status.update(label=f"Run stopped: {exc}", state="error", expanded=True)
+                    st.exception(exc)
+                    st.stop()
+            status.update(label="Run complete", state="complete", expanded=False)
+        st.session_state["showcase_runs"] = runs
+        st.session_state["showcase_mode"] = "batch" if selected_question is None else "detail"
+        st.session_state["showcase_context"] = {"company": company, "phase": phase, "model": model}
+
+    runs = st.session_state.get("showcase_runs")
+    if runs:
+        context = st.session_state.get("showcase_context", {})
+        if st.session_state.get("showcase_mode") == "batch":
+            render_batch(runs, context.get("company", company), context.get("phase", phase),
+                         context.get("model", model))
+        else:
+            render_detail(runs[0])
+    else:
+        with st.container(border=True, horizontal_alignment="center"):
+            st.markdown("### Choose a company and question to begin")
+            st.caption("Run all questions for the evaluation dashboard, or select one for a full trace.")
+
+with tab_workbench:
     st.caption("Look up the raw ingested chunks for a company's document and page "
                "number - reads straight from the docs collection, no PDF access "
                "needed. The embedding vector is left out of what's shown here; "
@@ -1129,70 +1221,3 @@ with st.expander(":material/find_in_page: Document workbench", expanded=False):
                 label = f"{meta.get('type', '?')} · {chunk.get('element-id', '?')}"
                 with st.expander(label):
                     st.json(chunk, expanded=True)
-
-if custom_question.strip():
-    # No FinanceBench reference exists for a question nobody wrote a gold
-    # answer for - expected_answer is a display string, not data judge.score
-    # runs against; run_one() checks question["id"] == "custom" and skips
-    # scoring entirely rather than judging against this placeholder text.
-    selected_question = {
-        "id": "custom", "question": custom_question.strip(), "doc_name": None,
-        "expected_answer": "— (custom question, no benchmark reference)",
-        "company": company,
-    }
-else:
-    selected_question = None if selection == "All questions" else company_questions[
-        labels.index(selection) - 1
-    ]
-with st.container(border=True, key="prompt-card"):
-    prompt_area, action_area = st.columns([8, 1.25], vertical_alignment="center",
-                                          gap="medium")
-    with prompt_area:
-        st.caption("Selected question" if selected_question else "Benchmark run")
-        if selected_question:
-            st.markdown(f"#### {selected_question['question']}")
-            if selected_question["id"] == "custom":
-                st.caption("Custom question · not scored — doc resolution runs "
-                          "normally, there is just no reference to grade against")
-            else:
-                st.caption(f"{selected_question['id']} · expected document: "
-                          f"{selected_question['doc_name']}")
-        else:
-            st.markdown(f"#### Run all {len(company_questions)} {company} questions")
-            st.caption("The results dashboard will compare FinanceBench and PRISM answers.")
-    with action_area:
-        run_label = "Run all" if selected_question is None else "Run trace"
-        run_clicked = st.button(run_label, type="primary", icon=":material/play_arrow:",
-                                width="stretch", disabled=provider != "OpenAI")
-
-if run_clicked:
-    targets = company_questions if selected_question is None else [selected_question]
-    runs = []
-    with st.status(f"Running {len(targets)} question{'s' if len(targets) != 1 else ''}…",
-                   expanded=True) as status:
-        for index, question in enumerate(targets, 1):
-            status.write(f"{index}/{len(targets)} · {question['id']}")
-            try:
-                runs.append(run_one(question, catalog_docs, dictionary_data, phase,
-                                    model, fusion, tuning))
-            except Exception as exc:
-                status.update(label=f"Run stopped: {exc}", state="error", expanded=True)
-                st.exception(exc)
-                st.stop()
-        status.update(label="Run complete", state="complete", expanded=False)
-    st.session_state["showcase_runs"] = runs
-    st.session_state["showcase_mode"] = "batch" if selected_question is None else "detail"
-    st.session_state["showcase_context"] = {"company": company, "phase": phase, "model": model}
-
-runs = st.session_state.get("showcase_runs")
-if runs:
-    context = st.session_state.get("showcase_context", {})
-    if st.session_state.get("showcase_mode") == "batch":
-        render_batch(runs, context.get("company", company), context.get("phase", phase),
-                     context.get("model", model))
-    else:
-        render_detail(runs[0])
-else:
-    with st.container(border=True, horizontal_alignment="center"):
-        st.markdown("### Choose a company and question to begin")
-        st.caption("Run all questions for the evaluation dashboard, or select one for a full trace.")
