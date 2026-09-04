@@ -11,6 +11,18 @@ def upsert(document: dict) -> None:
     )
 
 
+def delete_all() -> int:
+    """Empties the catalog collection. Used before a full rebuild - a stale
+    entry from a previous extractor sitting alongside a freshly rebuilt one,
+    with no way to tell them apart at read time, is worse than an empty
+    collection a rebuild is about to repopulate."""
+    rows = query(
+        f"DELETE FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` "
+        "RETURNING 1"
+    )
+    return len(rows)
+
+
 def load_all() -> list:
     """Only the fields resolution needs. `value` is a reserved word in N1QL and
     must be backticked in the projection."""
