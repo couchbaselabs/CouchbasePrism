@@ -25,7 +25,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from eval import judge, phases  # noqa: E402
 from eval.corpora import load as load_corpus  # noqa: E402
 from prism import (  # noqa: E402
-    catalog, config, dictionary, retrieval, runtime, trace,
+    catalog, config, couchbase_io, dictionary, retrieval, runtime, trace,
 )
 
 
@@ -203,6 +203,37 @@ def company_catalog(catalog_docs: list, company: str) -> list:
     return matched or catalog_docs
 
 
+def fetch_chunks(doc_name: str, page: int, search_terms: str = None) -> list:
+    """Every chunk for one document + page, JSON-ready. The embedding vector
+    is stripped in Python rather than excluded in SQL++ - nothing elsewhere in
+    this codebase relies on an EXCLUDE clause, and this keeps the query
+    portable rather than depending on a possibly version-gated extension.
+
+    search_terms goes through the same Search Vector Index the retrieval path
+    already queries, not a raw LIKE - consistent with how every other query
+    against this collection works, and it means the workbench is exercising
+    the real FTS index rather than a separate ad hoc filter mechanism.
+    """
+    where = ["d.`xmeta-data`.filename = $filename", "d.`meta-data`.`page-number` = $page"]
+    params = {"$filename": config.source_filename(doc_name), "$page": page}
+    if search_terms:
+        where.append(
+            'SEARCH(d, {"query": {"match": $terms, "field": "text-to-embed", '
+            '"operator": "or"}}, {"index": "' + config.FTS_DOCS_INDEX + '"})'
+        )
+        params["$terms"] = search_terms
+    rows = couchbase_io.query(
+        "SELECT META(d).id AS _id, d.* "
+        f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY d.`meta-data`.type, d.`element-id`",
+        params,
+    )
+    for row in rows:
+        row.pop("text-embedding", None)
+    return rows
+
+
 def trace_stats(events: list) -> dict:
     llm_events = [e for e in events if e.get("type") == "llm_call"]
     sql_events = [e for e in events if e.get("type") == "couchbase_query"]
@@ -234,8 +265,14 @@ def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
         result = runtime.answer_question(
             question["question"], company_catalog(catalog_docs, question["company"]),
             dictionary_data, options=options, model=model)
-        verdict = judge.score(question["question"], question["expected_answer"],
-                              result["answer"], model=model)
+        # A custom question has no FinanceBench reference to judge against -
+        # question["expected_answer"] is display text for the UI, not data a
+        # judge call should ever see.
+        verdict = ({"passed": None, "method": "unscored",
+                   "comment": "Custom question — no reference answer to score against."}
+                  if question["id"] == "custom" else
+                  judge.score(question["question"], question["expected_answer"],
+                             result["answer"], model=model))
     stats = trace_stats(events)
     stats["wall_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return {"question": question, "result": result, "verdict": verdict,
@@ -713,7 +750,8 @@ def render_detail(run: dict):
         st.markdown(f"### {q['question']}")
         cols = st.columns(2)
         with cols[0]:
-            st.caption("FinanceBench reference")
+            st.caption("Custom question — no reference" if q["id"] == "custom"
+                      else "FinanceBench reference")
             st.write(q["expected_answer"])
         with cols[1]:
             st.caption("PRISM answer")
@@ -923,11 +961,68 @@ with st.sidebar:
             st.markdown("### Couchbase Prism")
             st.caption("Governed retrieval that works immediately—and learns from reviewed use")
 
+    st.markdown("### Catalog")
+    st.caption(f"{len(catalog_docs)} document(s), built from ingested chunks — "
+               "no PDF file access needed at build time.")
+    with st.expander("Rebuild catalog", icon=":material/refresh:"):
+        st.caption("Empties the catalog collection, then rebuilds one entry per "
+                   "document that has chunks ingested, reading each one's cover "
+                   "page from those chunks rather than the PDF. Equivalent to "
+                   "`manage.py build-catalog`, but sourced from Couchbase alone.")
+        if st.button("Run catalog", icon=":material/play_arrow:", width="stretch",
+                     help="This empties the catalog collection first. Rebuilding "
+                          "reads only what is already in Couchbase."):
+            # Deliberately model=None rather than the per-question `model` dict
+            # below: that dict doesn't exist yet at this point in the script,
+            # and a catalog rebuild is an admin operation independent of
+            # whatever the user picks per-role for answering a question. None
+            # resolves to config.MODEL_UTILITY, same as manage.py build-catalog.
+            sectors = load_corpus("financebench").sectors()
+            progress_bar = st.progress(0.0)
+            status = st.empty()
+
+            def on_progress(i, total, doc_name, result):
+                progress_bar.progress(i / total)
+                status.caption(
+                    f"[{i}/{total}] {doc_name}"
+                    + ("" if result["ok"] else f" — ERROR: {result['error']}"))
+
+            results = catalog.rebuild_from_chunks(model=None, sectors=sectors,
+                                                  on_progress=on_progress)
+            ok = sum(1 for r in results if r["ok"])
+            failed = [r for r in results if not r["ok"]]
+            # st.success/st.error rendered here would never be seen: st.rerun()
+            # below aborts this run's rendering before the browser paints it.
+            # st.toast is queued and survives the rerun; failure detail goes in
+            # session_state so the expander below can show it on the next run.
+            if not results:
+                st.toast("No documents have chunks ingested — nothing to catalog.",
+                         icon=":material/warning:")
+            elif failed:
+                st.toast(f"Rebuilt {ok}/{len(results)} document(s); "
+                        f"{len(failed)} failed.", icon=":material/warning:")
+            else:
+                st.toast(f"Rebuilt {ok}/{len(results)} document(s).",
+                         icon=":material/check_circle:")
+            st.session_state["catalog_rebuild_failures"] = failed
+            load_catalog.clear()
+            st.rerun()
+        failures = st.session_state.get("catalog_rebuild_failures")
+        if failures:
+            st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
+
+    st.space("small")
     st.markdown("### Run configuration")
     company = st.selectbox("Company", companies, index=companies.index("3M") if "3M" in companies else 0)
     company_questions = [q for q in questions if q["company"] == company]
     labels = ["All questions"] + [f"{q['id']} · {q['question'][:56]}" for q in company_questions]
     selection = st.selectbox("Question", labels)
+    custom_question = st.text_area(
+        "Or ask your own question", placeholder=f"Ask anything about {company}'s filings…",
+        help="Runs the same pipeline, scoped to the company selected above. There is "
+             "no FinanceBench reference for a custom question, so it is not scored — "
+             "the trace and answer still show in full. Overrides the selection above "
+             "when non-empty.")
     phase = st.selectbox("Retrieval architecture", sorted(phases.PHASES),
                          index=sorted(phases.PHASES).index(phases.DEFAULT_PHASE),
                          format_func=lambda p: phases.LABELS.get(p, p))
@@ -1001,58 +1096,54 @@ with st.sidebar:
         else:
             st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
 
-    st.space("small")
-    st.markdown("### Catalog")
-    st.caption(f"{len(catalog_docs)} document(s), built from ingested chunks — "
-               "no PDF file access needed at build time.")
-    with st.expander("Rebuild catalog", icon=":material/refresh:"):
-        st.caption("Empties the catalog collection, then rebuilds one entry per "
-                   "document that has chunks ingested, reading each one's cover "
-                   "page from those chunks rather than the PDF. Equivalent to "
-                   "`manage.py build-catalog`, but sourced from Couchbase alone.")
-        if st.button("Run catalog", icon=":material/play_arrow:", width="stretch",
-                     help="This empties the catalog collection first. Rebuilding "
-                          "reads only what is already in Couchbase."):
-            sectors = load_corpus("financebench").sectors()
-            progress_bar = st.progress(0.0)
-            status = st.empty()
-
-            def on_progress(i, total, doc_name, result):
-                progress_bar.progress(i / total)
-                status.caption(
-                    f"[{i}/{total}] {doc_name}"
-                    + ("" if result["ok"] else f" — ERROR: {result['error']}"))
-
-            results = catalog.rebuild_from_chunks(model=model, sectors=sectors,
-                                                  on_progress=on_progress)
-            ok = sum(1 for r in results if r["ok"])
-            failed = [r for r in results if not r["ok"]]
-            # st.success/st.error rendered here would never be seen: st.rerun()
-            # below aborts this run's rendering before the browser paints it.
-            # st.toast is queued and survives the rerun; failure detail goes in
-            # session_state so the expander below can show it on the next run.
-            if not results:
-                st.toast("No documents have chunks ingested — nothing to catalog.",
-                         icon=":material/warning:")
-            elif failed:
-                st.toast(f"Rebuilt {ok}/{len(results)} document(s); "
-                        f"{len(failed)} failed.", icon=":material/warning:")
-            else:
-                st.toast(f"Rebuilt {ok}/{len(results)} document(s).",
-                         icon=":material/check_circle:")
-            st.session_state["catalog_rebuild_failures"] = failed
-            load_catalog.clear()
-            st.rerun()
-        failures = st.session_state.get("catalog_rebuild_failures")
-        if failures:
-            st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
-
     st.space("medium")
     fts_sidebar()
 
-selected_question = None if selection == "All questions" else company_questions[
-    labels.index(selection) - 1
-]
+with st.expander(":material/find_in_page: Document workbench", expanded=False):
+    st.caption("Look up the raw ingested chunks for a company's document and page "
+               "number - reads straight from the docs collection, no PDF access "
+               "needed. The embedding vector is left out of what's shown here; "
+               "2048 floats add nothing to read.")
+    wb_cols = st.columns([2, 3, 1, 2.5])
+    with wb_cols[0]:
+        wb_company = st.selectbox("Company", companies, key="wb_company")
+    wb_doc_names = sorted({d.get("doc_name") for d in company_catalog(catalog_docs, wb_company)
+                          if d.get("doc_name")})
+    with wb_cols[1]:
+        wb_doc = (st.selectbox("Document", wb_doc_names, key="wb_doc") if wb_doc_names
+                  else st.selectbox("Document", ["(none catalogued)"], disabled=True))
+    with wb_cols[2]:
+        wb_page = st.number_input("Page", min_value=1, step=1, key="wb_page")
+    with wb_cols[3]:
+        wb_terms = st.text_input("Search terms (optional)", key="wb_terms",
+                                 placeholder="e.g. total current assets")
+    if st.button("Fetch", icon=":material/search:", key="wb_fetch",
+                disabled=not wb_doc_names):
+        chunks = fetch_chunks(wb_doc, int(wb_page), wb_terms.strip() or None)
+        if not chunks:
+            st.info("No chunks found for that document, page, and filter.")
+        else:
+            st.caption(f"{len(chunks)} chunk(s)")
+            for chunk in chunks:
+                meta = chunk.get("meta-data") or {}
+                label = f"{meta.get('type', '?')} · {chunk.get('element-id', '?')}"
+                with st.expander(label):
+                    st.json(chunk, expanded=True)
+
+if custom_question.strip():
+    # No FinanceBench reference exists for a question nobody wrote a gold
+    # answer for - expected_answer is a display string, not data judge.score
+    # runs against; run_one() checks question["id"] == "custom" and skips
+    # scoring entirely rather than judging against this placeholder text.
+    selected_question = {
+        "id": "custom", "question": custom_question.strip(), "doc_name": None,
+        "expected_answer": "— (custom question, no benchmark reference)",
+        "company": company,
+    }
+else:
+    selected_question = None if selection == "All questions" else company_questions[
+        labels.index(selection) - 1
+    ]
 with st.container(border=True, key="prompt-card"):
     prompt_area, action_area = st.columns([8, 1.25], vertical_alignment="center",
                                           gap="medium")
@@ -1060,8 +1151,12 @@ with st.container(border=True, key="prompt-card"):
         st.caption("Selected question" if selected_question else "Benchmark run")
         if selected_question:
             st.markdown(f"#### {selected_question['question']}")
-            st.caption(f"{selected_question['id']} · expected document: "
-                       f"{selected_question['doc_name']}")
+            if selected_question["id"] == "custom":
+                st.caption("Custom question · not scored — doc resolution runs "
+                          "normally, there is just no reference to grade against")
+            else:
+                st.caption(f"{selected_question['id']} · expected document: "
+                          f"{selected_question['doc_name']}")
         else:
             st.markdown(f"#### Run all {len(company_questions)} {company} questions")
             st.caption("The results dashboard will compare FinanceBench and PRISM answers.")
@@ -1086,7 +1181,7 @@ if run_clicked:
                 st.stop()
         status.update(label="Run complete", state="complete", expanded=False)
     st.session_state["showcase_runs"] = runs
-    st.session_state["showcase_mode"] = "batch" if selection == "All questions" else "detail"
+    st.session_state["showcase_mode"] = "batch" if selected_question is None else "detail"
     st.session_state["showcase_context"] = {"company": company, "phase": phase, "model": model}
 
 runs = st.session_state.get("showcase_runs")
