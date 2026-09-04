@@ -56,7 +56,10 @@ Return ONLY one valid JSON object:
           "description": "<what the fact represents>",
           "content_anchors": [
             "<likely verbatim row, column, field, or parameter label>"
-          ]
+          ],
+          "period_role": "<omit for a single-period fact; otherwise a short "
+                          "label distinguishing which period this is, e.g. "
+                          "'prior' vs 'current', or 'fy2021' vs 'fy2022'>"
         }
       ],
       "rationale": "<why or when this method is defensible>"
@@ -90,7 +93,14 @@ GUIDELINES:
 - Do not use function calls or identifiers containing spaces.
 - Do not calculate numerical results.
 - Name each required fact for the quantity only. Do not build the subject,
-  date, period, or version into the ID.
+  date, period, or version into the ID - EXCEPT that a formula needing the
+  same quantity from two or more periods (an average across fiscal years is
+  the common case) genuinely needs distinct ids, since each becomes its own
+  variable in the formula. When that happens, give each a short distinguishing
+  id AND set `period_role` on both - the id can vary however is natural, but
+  `period_role` is what downstream binding trusts to know these are
+  deliberately different periods of the same thing, not a binding error. Every
+  fact that is NOT part of a multi-period group should omit `period_role`.
 - Content anchors must be labels written exactly as the source would print
   them, containing no subject name, date, period, or qualifier - sources
   print a label once and reuse it across every column.

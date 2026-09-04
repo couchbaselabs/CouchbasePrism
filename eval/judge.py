@@ -21,6 +21,15 @@ JUDGE_SYSTEM_PROMPT = (
     "correct against a reference answer. The candidate is expected to be more verbose and "
     "phrased differently - that alone is not a failure. Judge only whether the candidate "
     "contains the same key facts, figures and conclusion as the reference.\n"
+    "When the reference names SEVERAL contributing causes (a 'what drove this change' "
+    "question), a 10-K's MD&A typically discusses more drivers than the reference happens "
+    "to enumerate. Use common sense: pass the candidate if it reaches the same overall "
+    "conclusion and correctly cites a majority of the reference's materially significant "
+    "drivers, even if it phrases them differently, omits a minor one, or adds other "
+    "well-sourced drivers the reference does not mention. Do not fail an answer solely for "
+    "not naming every cause the reference lists, or for including extra correctly-cited "
+    "context - fail it only when it reaches a different conclusion, misstates a key figure, "
+    "or is missing enough of the material drivers that the explanation itself is thin.\n"
     'Respond with exactly one JSON object: {"pass": true or false, "comment": "one '
     'sentence explaining the verdict"}'
 )

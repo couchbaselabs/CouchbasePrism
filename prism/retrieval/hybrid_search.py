@@ -69,18 +69,41 @@ SELECT_FIELDS = """SELECT META(d).id AS id,
            SEARCH_SCORE() AS score"""
 
 
+def _merged_terms(concept: str, anchors: list) -> str:
+    """Concept + every anchor, lowercased, hyphens/slashes/punctuation split
+    into word breaks, deduped, and joined into one bag of words for a single
+    OR match - rather than requiring each anchor to appear as a verbatim
+    phrase, which most of the planner's anchors never do."""
+    seen = []
+    for text in [concept or ""] + list(anchors or []):
+        cleaned = re.sub(r"[^a-z0-9]+", " ", text.lower())
+        for word in cleaned.split():
+            if word not in seen:
+                seen.append(word)
+    return " ".join(seen)
+
+
 def _lexical_clause(question: str, anchors: list, concept: str,
                     title_boost: float, params: dict) -> str:
     """The disjuncts BM25 scores against. Falls back to the question text only
     when there is nothing better, so the leg never drops out entirely."""
     disjuncts = []
-    if concept:
-        disjuncts.append('{"match": $concept, "field": "text-to-embed", '
-                         '"operator": "and"}')
-        params["$concept"] = concept
-    for i, anchor in enumerate(anchors or []):
-        disjuncts.append(f'{{"match_phrase": $a{i}, "field": "text-to-embed"}}')
-        params[f"$a{i}"] = anchor
+    terms = _merged_terms(concept, anchors)
+    if terms:
+        disjuncts.append('{"match": $terms, "field": "text-to-embed", '
+                         '"operator": "or"}')
+        params["$terms"] = terms
+    # Tried adding match_phrase per anchor here to give "Total assets" and
+    # "Net income" exact-phrase precision over the bag match's loose word
+    # overlap. Measured worse, not better, on financebench_id_10420: those
+    # captions are printed verbatim on a dozen pages of a real 10-K (a parent-
+    # only Schedule I balance sheet, segment tables, 5-year Selected Financial
+    # Data) - phrase-matching found MORE pages that legitimately say "Total
+    # assets", not the right one, and some outranked the actual consolidated
+    # balance sheet (fused rank 8 -> 16). The problem isn't phrase vs bag
+    # matching; it's that BM25 alone cannot tell which of several genuine
+    # occurrences is the consolidated statement for the specific years asked
+    # about. Left as bag-only; see financebench_id_10420 in debug history.
     if not disjuncts:
         disjuncts.append('{"match": $match_text, "field": "text-to-embed"}')
         params["$match_text"] = question

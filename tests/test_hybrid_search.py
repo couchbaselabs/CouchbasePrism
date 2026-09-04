@@ -26,7 +26,7 @@ def search_objects(statement: str) -> list:
         end = statement.index(', {"index"', start)
         blob = statement[start:end]
         for token in ("$query_vector", "$filename", "$match_text",
-                      "$concept", "$a0", "$a1", "$a2"):
+                      "$terms", "$concept", "$a0", "$a1", "$a2"):
             blob = blob.replace(token, f'"{token}"')
         objects.append(json.loads(blob))
         cursor = end
@@ -54,14 +54,20 @@ def test_emits_one_statement_carrying_both_legs():
     assert vector["knn"][0]["field"] == "text-embedding"            # vector
 
 
-def test_bm25_matches_anchors_as_phrases_not_the_question():
+def test_bm25_matches_the_merged_term_bag_not_the_question():
     # Sending the raw prompt scores mostly on common words and measurably
-    # bought nothing; the anchors are the printed row labels worth matching.
+    # bought nothing. Concept + anchors are lowercased, split on punctuation,
+    # deduped and OR-matched as one bag - not sent as match_phrase per anchor,
+    # which was tried and measured WORSE (financebench_id_10420: exact-phrase
+    # anchors matched MORE pages that legitimately print the same caption
+    # elsewhere in the filing, not the right one - see hybrid_search.py).
     statement, params = build_statement("Does 3M have a healthy liquidity profile?",
                                         VEC, "3M_2023Q2_10Q", ANCHORS)
     disjuncts = search_object(statement)["query"]["conjuncts"][1]["disjuncts"]
-    assert all("match_phrase" in d for d in disjuncts)
-    assert [params["$a0"], params["$a1"]] == ANCHORS
+    assert len(disjuncts) == 1
+    assert disjuncts[0]["match"] == "$terms"
+    assert disjuncts[0]["operator"] == "or"
+    assert set(params["$terms"].split()) == {"total", "current", "assets", "liabilities"}
     assert "$match_text" not in params
 
 
