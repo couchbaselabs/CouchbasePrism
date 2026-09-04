@@ -211,11 +211,12 @@ def company_catalog(catalog_docs: list, company: str) -> list:
     return matched or catalog_docs
 
 
-def fetch_chunks(doc_name: str, page: int, search_terms: str = None) -> list:
-    """Every chunk for one document + page, JSON-ready. The embedding vector
-    is stripped in Python rather than excluded in SQL++ - nothing elsewhere in
-    this codebase relies on an EXCLUDE clause, and this keeps the query
-    portable rather than depending on a possibly version-gated extension.
+def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
+                 limit: int = 50) -> list:
+    """Chunks for one document, JSON-ready. The embedding vector is stripped
+    in Python rather than excluded in SQL++ - nothing elsewhere in this
+    codebase relies on an EXCLUDE clause, and this keeps the query portable
+    rather than depending on a possibly version-gated extension.
 
     The whole filter goes through the Search Vector Index via one SEARCH(),
     not plain N1QL WHERE predicates - the collection has no GSI on filename or
@@ -225,31 +226,64 @@ def fetch_chunks(doc_name: str, page: int, search_terms: str = None) -> list:
     that both fields ARE mapped: xmeta-data.filename as text/keyword analyzer
     (an exact-match `match`, same as the retrieval path already uses),
     meta-data.page-number as a `number` field - FTS has no numeric term query,
-    so an exact page is a min/max range collapsed to one point. search_terms
-    joins as a third conjunct on the same text-to-embed field the retrieval
-    path searches, not a raw LIKE.
+    so an exact page is a min/max range collapsed to one point.
+
+    search_terms scopes to the WHOLE document, not one page - `page` is
+    ignored entirely when terms are given, not merely de-prioritized, since
+    finding where a term appears is the point and a page constraint would
+    defeat it. Same text-to-embed field and match/OR shape the retrieval
+    path's BM25 leg already uses (the index's own scoring_model is "bm25",
+    confirmed from its live definition), not a raw LIKE.
+
+    A document-wide term search has no natural bound the way a single page
+    does, so this caps at `limit` - callers should tell the user when the
+    result is exactly at the cap, since that's the signal more exist.
     """
-    conjuncts = [
-        '{"field": "xmeta-data.filename", "match": $filename}',
-        '{"field": "meta-data.page-number", "min": $page, "max": $page, '
-        '"inclusive_min": true, "inclusive_max": true}',
-    ]
-    params = {"$filename": config.source_filename(doc_name), "$page": page}
+    conjuncts = ['{"field": "xmeta-data.filename", "match": $filename}']
+    params = {"$filename": config.source_filename(doc_name)}
     if search_terms:
         conjuncts.append(
             '{"match": $terms, "field": "text-to-embed", "operator": "or"}')
         params["$terms"] = search_terms
+    else:
+        conjuncts.append(
+            '{"field": "meta-data.page-number", "min": $page, "max": $page, '
+            '"inclusive_min": true, "inclusive_max": true}')
+        params["$page"] = page
     rows = couchbase_io.query(
         "SELECT META(d).id AS _id, d.* "
         f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d "
         f'WHERE SEARCH(d, {{"query": {{"conjuncts": [{", ".join(conjuncts)}]}}}}, '
         f'{{"index": "{config.FTS_DOCS_INDEX}"}}) '
-        "ORDER BY d.`meta-data`.type, d.`element-id`",
+        "ORDER BY d.`meta-data`.`page-number`, d.`meta-data`.type, d.`element-id` "
+        f"LIMIT {int(limit)}",
         params,
     )
     for row in rows:
         row.pop("text-embedding", None)
     return rows
+
+
+def highlight_terms(text: str, terms: str) -> str:
+    """text-to-embed with every matched search word wrapped in <mark>, so a
+    hit reads as a hit instead of a wall of text to re-search by eye.
+
+    Escapes the base text first, exactly like _md_bold() elsewhere in this
+    file - then escapes each search word too before building the regex, so a
+    word containing an HTML special character still matches literally against
+    the now-escaped text rather than silently failing to match or reopening
+    the injection risk _md_bold was written to close.
+    """
+    escaped_text = html.escape(text or "")
+    words = [html.escape(w) for w in re.split(r"\s+", (terms or "").strip()) if w]
+    if not words:
+        return f'<div style="white-space:pre-wrap">{escaped_text}</div>'
+    pattern = re.compile("(" + "|".join(re.escape(w) for w in words) + ")", re.IGNORECASE)
+    highlighted = pattern.sub(
+        r'<mark style="background:#fde68a;color:#1a1a1a;padding:0 2px;'
+        r'border-radius:2px">\1</mark>',
+        escaped_text)
+    return f'<div style="white-space:pre-wrap;line-height:1.5">{highlighted}</div>'
 
 
 def trace_stats(events: list) -> dict:
@@ -1201,11 +1235,15 @@ with tab_ask:
             st.markdown("### Choose a company and question to begin")
             st.caption("Run all questions for the evaluation dashboard, or select one for a full trace.")
 
+WORKBENCH_FETCH_LIMIT = 50
+
 with tab_workbench:
-    st.caption("Look up the raw ingested chunks for a company's document and page "
-               "number - reads straight from the docs collection, no PDF access "
-               "needed. The embedding vector is left out of what's shown here; "
-               "2048 floats add nothing to read.")
+    st.caption("Look up the raw ingested chunks for a company's document - reads "
+               "straight from the docs collection through the Search Vector Index "
+               "(BM25, same as the retrieval path), no PDF access needed. The "
+               "embedding vector is left out of what's shown here; 2048 floats add "
+               "nothing to read. Search terms search the WHOLE document, ignoring "
+               "the page number - without terms, Page scopes to one page.")
     wb_cols = st.columns([2, 3, 1, 2.5])
     with wb_cols[0]:
         wb_company = st.selectbox("Company", companies, key="wb_company")
@@ -1221,13 +1259,25 @@ with tab_workbench:
                                  placeholder="e.g. total current assets")
     if st.button("Fetch", icon=":material/search:", key="wb_fetch",
                 disabled=not wb_doc_names):
-        chunks = fetch_chunks(wb_doc, int(wb_page), wb_terms.strip() or None)
+        terms = wb_terms.strip() or None
+        chunks = fetch_chunks(wb_doc, page=None if terms else int(wb_page),
+                              search_terms=terms, limit=WORKBENCH_FETCH_LIMIT)
         if not chunks:
-            st.info("No chunks found for that document, page, and filter.")
+            st.info("No chunks found for that document and filter.")
         else:
-            st.caption(f"{len(chunks)} chunk(s)")
+            note = (f"{len(chunks)} chunk(s) across the whole document" if terms
+                    else f"{len(chunks)} chunk(s)")
+            if len(chunks) == WORKBENCH_FETCH_LIMIT:
+                note += (f" — showing the first {WORKBENCH_FETCH_LIMIT}; "
+                        "narrow the search terms for more precision")
+            st.caption(note)
             for chunk in chunks:
                 meta = chunk.get("meta-data") or {}
-                label = f"{meta.get('type', '?')} · {chunk.get('element-id', '?')}"
+                label = (f"p{meta.get('page-number', '?')} · {meta.get('type', '?')} · "
+                        f"{chunk.get('element-id', '?')}")
                 with st.expander(label):
+                    if terms:
+                        st.markdown("**Matched text, terms highlighted:**")
+                        st.html(highlight_terms(chunk.get("text-to-embed"), terms))
+                        st.divider()
                     st.json(chunk, expanded=True)
