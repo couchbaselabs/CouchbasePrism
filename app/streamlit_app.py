@@ -217,23 +217,33 @@ def fetch_chunks(doc_name: str, page: int, search_terms: str = None) -> list:
     this codebase relies on an EXCLUDE clause, and this keeps the query
     portable rather than depending on a possibly version-gated extension.
 
-    search_terms goes through the same Search Vector Index the retrieval path
-    already queries, not a raw LIKE - consistent with how every other query
-    against this collection works, and it means the workbench is exercising
-    the real FTS index rather than a separate ad hoc filter mechanism.
+    The whole filter goes through the Search Vector Index via one SEARCH(),
+    not plain N1QL WHERE predicates - the collection has no GSI on filename or
+    page-number, so a plain `d.xmeta-data.filename = $filename` predicate
+    fell back to a primary index scan. Confirmed against the live index
+    definition (GET /api/bucket/{bucket}/scope/{scope}/index/ftsFinanceBench)
+    that both fields ARE mapped: xmeta-data.filename as text/keyword analyzer
+    (an exact-match `match`, same as the retrieval path already uses),
+    meta-data.page-number as a `number` field - FTS has no numeric term query,
+    so an exact page is a min/max range collapsed to one point. search_terms
+    joins as a third conjunct on the same text-to-embed field the retrieval
+    path searches, not a raw LIKE.
     """
-    where = ["d.`xmeta-data`.filename = $filename", "d.`meta-data`.`page-number` = $page"]
+    conjuncts = [
+        '{"field": "xmeta-data.filename", "match": $filename}',
+        '{"field": "meta-data.page-number", "min": $page, "max": $page, '
+        '"inclusive_min": true, "inclusive_max": true}',
+    ]
     params = {"$filename": config.source_filename(doc_name), "$page": page}
     if search_terms:
-        where.append(
-            'SEARCH(d, {"query": {"match": $terms, "field": "text-to-embed", '
-            '"operator": "or"}}, {"index": "' + config.FTS_DOCS_INDEX + '"})'
-        )
+        conjuncts.append(
+            '{"match": $terms, "field": "text-to-embed", "operator": "or"}')
         params["$terms"] = search_terms
     rows = couchbase_io.query(
         "SELECT META(d).id AS _id, d.* "
         f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d "
-        f"WHERE {' AND '.join(where)} "
+        f'WHERE SEARCH(d, {{"query": {{"conjuncts": [{", ".join(conjuncts)}]}}}}, '
+        f'{{"index": "{config.FTS_DOCS_INDEX}"}}) '
         "ORDER BY d.`meta-data`.type, d.`element-id`",
         params,
     )
