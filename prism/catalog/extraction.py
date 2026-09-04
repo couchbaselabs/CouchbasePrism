@@ -1,8 +1,13 @@
-"""Deriving a catalog document from a PDF's cover page.
+"""Deriving a catalog document from a document's cover page.
 
-A fast cover-page pass, NOT a full layout parse: PyMuPDF reads pages 1-5 in
-~100-600ms against 24-200s for a full conversion. The catalog never needs
-layout analysis, so it should never pay for it.
+A fast cover-page pass, NOT a full layout parse. Two sources, same shape
+after: `cover_text` reads pages 1-5 directly from the PDF via PyMuPDF
+(~100-600ms); `cover_text_from_chunks` reads the same pages from chunks the
+Couchbase AI Data Plane workflow already produced, since ingestion happens
+before catalog build and the cover page's text is already sitting in
+Couchbase with page-number indexed. The catalog never needs layout analysis,
+so it should never pay for one - and building from chunks means it never
+needs local PDF file access either.
 """
 import datetime
 import re
@@ -10,7 +15,8 @@ import time
 
 import pymupdf
 
-from .. import llm
+from .. import config, llm
+from ..couchbase_io import query
 
 COVER_PAGES = 5
 FIELDS = ["company", "doc_type", "period_end_date"]
@@ -48,6 +54,52 @@ def cover_text(pdf_path: str, pages: int = COVER_PAGES) -> str:
     n = min(pages, doc.page_count)
     return "\n".join(f"--- page {i + 1} ---\n{doc[i].get_text(sort=True)}"
                      for i in range(n))
+
+
+_ELEMENT_INDEX = re.compile(r"/(\d+)$")
+# docling's element-id ("#/texts/N", "#/tables/N", ...) is not one counter -
+# each element TYPE has its own independent sequence, so a plain sort of the
+# id string interleaves them arbitrarily. Verified live on a real cover page:
+# Couchbase's own result order came back as texts/10, texts/3, texts/1,
+# tables/0, texts/0 - the actual title chunk (texts/0) arrived LAST. This
+# needs the same care cover_text()'s sort=True gives PyMuPDF, just applied to
+# a different kind of scrambling: sort by (page, is-a-table, index within
+# that element's own counter). Tables sort after text on the same page since
+# a cover page's company/form/period is essentially never inside one, and
+# ordering text correctly matters far more than exactly where a table lands.
+def _chunk_sort_key(chunk: dict) -> tuple:
+    match = _ELEMENT_INDEX.search(chunk.get("element_id") or "")
+    index = int(match.group(1)) if match else 0
+    return (chunk.get("page") or 0, chunk.get("type") == "table", index)
+
+
+def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES) -> str:
+    """Same output shape as cover_text() - "--- page N ---" markers, one block
+    per page - but sourced from chunks the AI Data Plane workflow already
+    ingested rather than opening the PDF again. No PDF file access needed.
+
+    Footnote-type chunks are excluded: a cover page's company/form/period
+    virtually never lives in one, and they only add token cost here.
+    """
+    rows = query(
+        f"""
+        SELECT d.`meta-data`.`page-number` AS page,
+               d.`meta-data`.type AS type,
+               d.`element-id` AS element_id,
+               d.`text-to-embed` AS text
+        FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d
+        WHERE d.`xmeta-data`.filename = $filename
+          AND d.`meta-data`.`page-number` <= $pages
+          AND d.`meta-data`.type != "footnote"
+        """,
+        {"$filename": config.source_filename(doc_name), "$pages": pages},
+    )
+    rows.sort(key=_chunk_sort_key)
+    by_page = {}
+    for row in rows:
+        by_page.setdefault(row["page"], []).append(row.get("text") or "")
+    return "\n".join(f"--- page {page} ---\n" + "\n".join(texts)
+                     for page, texts in sorted(by_page.items()))
 
 
 def _normalize_ws(s: str) -> str:
@@ -133,8 +185,8 @@ def fiscal_year(iso_date: str):
     return year - 1 if month == 1 and day <= 7 else year
 
 
-def build_document(doc_name: str, extraction: dict,
-                   gics_sector: str = None) -> dict:
+def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
+                   extractor: str = "pymupdf-sort+closed-set-classification") -> dict:
     """Only the fields something actually reads.
 
     Each extracted field keeps its {value, confidence, source_span} envelope
@@ -155,7 +207,7 @@ def build_document(doc_name: str, extraction: dict,
         "doc_period": (fiscal_year(to_iso_date(raw))
                        or period_from_doc_name(doc_name)),
         "lineage": {
-            "extractor": "pymupdf-sort+closed-set-classification",
+            "extractor": extractor,
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
     }
@@ -169,3 +221,13 @@ def build_from_pdf(pdf_path: str, doc_name: str, model: str = None,
                    gics_sector: str = None) -> dict:
     return build_document(doc_name, classify_cover(cover_text(pdf_path), model=model),
                           gics_sector=gics_sector)
+
+
+def build_from_chunks(doc_name: str, model: str = None, gics_sector: str = None,
+                      pages: int = COVER_PAGES) -> dict:
+    """Same classification, sourced from already-ingested chunks instead of
+    the PDF. This is the path that needs no local PDF file at all."""
+    return build_document(
+        doc_name, classify_cover(cover_text_from_chunks(doc_name, pages), model=model),
+        gics_sector=gics_sector,
+        extractor="chunks-sort+closed-set-classification")

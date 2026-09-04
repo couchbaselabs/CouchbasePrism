@@ -2,6 +2,7 @@
 validation and conclusion agreement. Each case below corresponds to a bug that
 actually occurred during the FinanceBench evaluation."""
 from prism import catalog, retrieval, runtime, trace
+from prism.catalog.extraction import _chunk_sort_key
 
 CATALOG = [
     {"doc_name": "3M_2018_10K", "doc_type": "10-K", "doc_period": 2018,
@@ -28,6 +29,32 @@ def test_day_first_and_iso_still_parse():
 
 def test_partial_date_is_left_unparsed_rather_than_invented():
     assert catalog.to_iso_date("March 2021") is None
+
+
+# -------------------------------------------------- cover text from chunks
+
+def test_chunk_sort_key_undoes_scrambled_element_ids():
+    # Live on a real cover page: Couchbase's own result order came back as
+    # texts/10, texts/3, texts/1, tables/0, texts/0 - the actual title chunk
+    # (texts/0) arrived LAST. docling's element-id is not one counter; each
+    # element type has its own independent sequence, so a plain sort of the
+    # id string interleaves them arbitrarily rather than reproducing reading
+    # order. This is the chunks equivalent of PyMuPDF's sort=True fix.
+    scrambled = [
+        {"page": 1, "type": "text", "element_id": "#/texts/10"},
+        {"page": 1, "type": "text", "element_id": "#/texts/3"},
+        {"page": 1, "type": "text", "element_id": "#/texts/1"},
+        {"page": 1, "type": "table", "element_id": "#/tables/0"},
+        {"page": 1, "type": "title", "element_id": "#/texts/0"},
+        {"page": 2, "type": "text", "element_id": "#/texts/33"},
+        {"page": 2, "type": "table", "element_id": "#/tables/1"},
+    ]
+    ordered = sorted(scrambled, key=_chunk_sort_key)
+    assert [c["element_id"] for c in ordered] == [
+        "#/texts/0", "#/texts/1", "#/texts/3", "#/texts/10",  # page 1 text, in order
+        "#/tables/0",                                          # page 1 table, after text
+        "#/texts/33", "#/tables/1",                            # page 2, same rule
+    ]
 
 
 # -------------------------------------------------------------- resolution

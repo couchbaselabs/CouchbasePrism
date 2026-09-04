@@ -21,6 +21,12 @@ from prism import catalog, config, couchbase_io, dictionary
 
 
 def build_catalog(args):
+    """Reads each cover page from chunks already ingested by the Couchbase AI
+    Data Plane workflow, not the PDF - `corpus.documents()` still decides
+    WHICH documents belong to this corpus/company and `corpus.sectors()`
+    still supplies gics_sector (corpus-external metadata, never extracted
+    from the document itself); only the source of the cover-page TEXT
+    changed, from PyMuPDF to chunks."""
     corpus = load_corpus(args.corpus)
     docs = corpus.documents(company=args.company)
     if not docs:
@@ -30,7 +36,8 @@ def build_catalog(args):
 
     if not args.all:
         # Catalog only what is retrievable. Ingestion fails per document, and an
-        # entry with no chunks makes resolution point at an empty document.
+        # entry with no chunks makes resolution point at an empty document - and
+        # now, with nothing at all to read a cover page from.
         ingested = catalog.ingested_doc_names()
         skipped = [n for n, _ in docs if n not in ingested]
         docs = [(n, p) for n, p in docs if n in ingested]
@@ -42,10 +49,10 @@ def build_catalog(args):
             sys.exit("no catalogued documents have chunks; is the workflow finished?")
     print(f"building catalog for {len(docs)} documents -> "
           f"{config.BUCKET}.{config.SCOPE}.{config.CATALOG_COLLECTION}", file=sys.stderr)
-    for i, (doc_name, path) in enumerate(docs, 1):
+    for i, (doc_name, _path) in enumerate(docs, 1):
         try:
-            document = catalog.build_from_pdf(str(path), doc_name, model=args.model,
-                                              gics_sector=sectors.get(doc_name))
+            document = catalog.build_from_chunks(doc_name, model=args.model,
+                                                  gics_sector=sectors.get(doc_name))
             catalog.upsert(document)
             print(f"  [{i}/{len(docs)}] {doc_name}: "
                   f"company={(document['company'] or {}).get('value')!r} "
