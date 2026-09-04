@@ -1001,6 +1001,52 @@ with st.sidebar:
         else:
             st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
 
+    st.space("small")
+    st.markdown("### Catalog")
+    st.caption(f"{len(catalog_docs)} document(s), built from ingested chunks — "
+               "no PDF file access needed at build time.")
+    with st.expander("Rebuild catalog", icon=":material/refresh:"):
+        st.caption("Empties the catalog collection, then rebuilds one entry per "
+                   "document that has chunks ingested, reading each one's cover "
+                   "page from those chunks rather than the PDF. Equivalent to "
+                   "`manage.py build-catalog`, but sourced from Couchbase alone.")
+        if st.button("Run catalog", icon=":material/play_arrow:", width="stretch",
+                     help="This empties the catalog collection first. Rebuilding "
+                          "reads only what is already in Couchbase."):
+            sectors = load_corpus("financebench").sectors()
+            progress_bar = st.progress(0.0)
+            status = st.empty()
+
+            def on_progress(i, total, doc_name, result):
+                progress_bar.progress(i / total)
+                status.caption(
+                    f"[{i}/{total}] {doc_name}"
+                    + ("" if result["ok"] else f" — ERROR: {result['error']}"))
+
+            results = catalog.rebuild_from_chunks(model=model, sectors=sectors,
+                                                  on_progress=on_progress)
+            ok = sum(1 for r in results if r["ok"])
+            failed = [r for r in results if not r["ok"]]
+            # st.success/st.error rendered here would never be seen: st.rerun()
+            # below aborts this run's rendering before the browser paints it.
+            # st.toast is queued and survives the rerun; failure detail goes in
+            # session_state so the expander below can show it on the next run.
+            if not results:
+                st.toast("No documents have chunks ingested — nothing to catalog.",
+                         icon=":material/warning:")
+            elif failed:
+                st.toast(f"Rebuilt {ok}/{len(results)} document(s); "
+                        f"{len(failed)} failed.", icon=":material/warning:")
+            else:
+                st.toast(f"Rebuilt {ok}/{len(results)} document(s).",
+                         icon=":material/check_circle:")
+            st.session_state["catalog_rebuild_failures"] = failed
+            load_catalog.clear()
+            st.rerun()
+        failures = st.session_state.get("catalog_rebuild_failures")
+        if failures:
+            st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
+
     st.space("medium")
     fts_sidebar()
 
