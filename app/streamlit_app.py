@@ -27,6 +27,7 @@ from eval.corpora import load as load_corpus  # noqa: E402
 from prism import (  # noqa: E402
     catalog, config, couchbase_io, dictionary, retrieval, runtime, trace,
 )
+from prism import initialize as prism_initialize  # noqa: E402
 
 
 st.set_page_config(
@@ -294,6 +295,43 @@ def highlight_terms(text: str, terms: str) -> str:
         r'border-radius:2px">\1</mark>',
         escaped_text)
     return f'<div style="white-space:pre-wrap;line-height:1.5">{highlighted}</div>'
+
+
+def run_initialize(status, sectors: dict) -> dict:
+    """Runs prism_initialize.run(), rendering progress into an already-open
+    st.status container. A real function, not inlined into the button's
+    click handler: Streamlit's script body executes at MODULE scope, and
+    nonlocal - which on_step/on_catalog_progress need to update the catalog
+    progress bar across calls - has no enclosing FUNCTION scope to bind to
+    there. Caught by actually loading the app, not by ast.parse: it checks
+    syntax, not scoping validity, so a SyntaxError this shape only surfaces
+    at import/exec time.
+    """
+    catalog_bar, catalog_line = None, None
+
+    def on_step(i, total, name, step_status, detail=None):
+        nonlocal catalog_bar, catalog_line
+        if step_status == "running":
+            status.write(f"[{i}/{total}] {name}…")
+            if name.startswith("Rebuild the catalog"):
+                catalog_bar = st.progress(0.0)
+                catalog_line = st.empty()
+        elif step_status == "error":
+            status.write(f"[{i}/{total}] {name}: ERROR {detail}")
+
+    def on_catalog_progress(i, total, doc_name, result):
+        if catalog_bar:
+            catalog_bar.progress(i / total)
+            catalog_line.caption(
+                f"[{i}/{total}] {doc_name}"
+                + ("" if result["ok"] else f" — ERROR: {result['error']}"))
+
+    # Deliberately model=None: an admin operation, independent of whatever the
+    # user picks per-role for answering a question elsewhere in the sidebar
+    # (that dict doesn't exist yet at this point in the script anyway). None
+    # resolves to config.MODEL_UTILITY, same as manage.py initialize.
+    return prism_initialize.run(model=None, sectors=sectors, on_step=on_step,
+                                on_catalog_progress=on_catalog_progress)
 
 
 def trace_stats(events: list) -> dict:
@@ -1023,53 +1061,46 @@ with st.sidebar:
             st.markdown("### Couchbase Prism")
             st.caption("Governed retrieval that works immediately—and learns from reviewed use")
 
-    st.markdown("### Catalog")
-    st.caption(f"{len(catalog_docs)} document(s), built from ingested chunks — "
-               "no PDF file access needed at build time.")
-    with st.expander("Rebuild catalog", icon=":material/refresh:"):
-        st.caption("Empties the catalog collection, then rebuilds one entry per "
-                   "document that has chunks ingested, reading each one's cover "
-                   "page from those chunks rather than the PDF. Equivalent to "
-                   "`manage.py build-catalog`, but sourced from Couchbase alone.")
-        if st.button("Run catalog", icon=":material/play_arrow:", width="stretch",
-                     help="This empties the catalog collection first. Rebuilding "
-                          "reads only what is already in Couchbase."):
-            # Deliberately model=None rather than the per-question `model` dict
-            # below: that dict doesn't exist yet at this point in the script,
-            # and a catalog rebuild is an admin operation independent of
-            # whatever the user picks per-role for answering a question. None
-            # resolves to config.MODEL_UTILITY, same as manage.py build-catalog.
+    st.markdown("### Initialize")
+    st.caption(f"{len(catalog_docs)} catalogued document(s). Run this after the "
+               "Couchbase AI Data Plane workflow finishes ingesting — no manual "
+               "index setup needed.")
+    with st.expander("Initialize environment", icon=":material/bolt:"):
+        st.caption("Empties and rebuilds the **catalog** (from ingested chunks, no "
+                   "PDF access), empties the **dictionary**, and rebuilds the "
+                   "**search index** from `design/fts-index.json`. This briefly "
+                   "degrades retrieval while the index reindexes (well under a "
+                   "minute for this corpus). **`docs` and the ingestion workflow "
+                   "are never touched.** Equivalent to `manage.py initialize`.")
+        if st.button("Initialize", icon=":material/bolt:", width="stretch",
+                     help="Destructive: empties the catalog and dictionary and "
+                          "rebuilds the search index. docs/chunks are untouched."):
             sectors = load_corpus("financebench").sectors()
-            progress_bar = st.progress(0.0)
-            status = st.empty()
-
-            def on_progress(i, total, doc_name, result):
-                progress_bar.progress(i / total)
-                status.caption(
-                    f"[{i}/{total}] {doc_name}"
-                    + ("" if result["ok"] else f" — ERROR: {result['error']}"))
-
-            results = catalog.rebuild_from_chunks(model=None, sectors=sectors,
-                                                  on_progress=on_progress)
-            ok = sum(1 for r in results if r["ok"])
-            failed = [r for r in results if not r["ok"]]
-            # st.success/st.error rendered here would never be seen: st.rerun()
-            # below aborts this run's rendering before the browser paints it.
-            # st.toast is queued and survives the rerun; failure detail goes in
-            # session_state so the expander below can show it on the next run.
-            if not results:
-                st.toast("No documents have chunks ingested — nothing to catalog.",
-                         icon=":material/warning:")
-            elif failed:
-                st.toast(f"Rebuilt {ok}/{len(results)} document(s); "
-                        f"{len(failed)} failed.", icon=":material/warning:")
-            else:
-                st.toast(f"Rebuilt {ok}/{len(results)} document(s).",
-                         icon=":material/check_circle:")
-            st.session_state["catalog_rebuild_failures"] = failed
+            with st.status("Initializing…", expanded=True) as status:
+                try:
+                    summary = run_initialize(status, sectors)
+                except Exception as exc:
+                    status.update(label=f"Initialize failed: {exc}", state="error",
+                                  expanded=True)
+                    st.session_state["initialize_failures"] = []
+                    st.exception(exc)
+                    st.stop()
+                ok = sum(1 for r in summary["catalog_results"] if r["ok"])
+                failed = [r for r in summary["catalog_results"] if not r["ok"]]
+                status.update(
+                    label=f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
+                          f"dictionary cleared ({len(summary['dictionary_removed'])} "
+                          "entrie(s)), search index rebuilt",
+                    state="complete", expanded=False)
+            # st.toast survives the st.rerun() below; st.success/st.error here
+            # would not - same reasoning as the earlier catalog-only button.
+            st.toast(f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
+                    "dictionary and search index rebuilt.",
+                    icon=":material/check_circle:" if not failed else ":material/warning:")
+            st.session_state["initialize_failures"] = failed
             load_catalog.clear()
             st.rerun()
-        failures = st.session_state.get("catalog_rebuild_failures")
+        failures = st.session_state.get("initialize_failures")
         if failures:
             st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
 

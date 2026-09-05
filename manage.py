@@ -18,6 +18,7 @@ import yaml
 
 from eval.corpora import load as load_corpus
 from prism import catalog, config, couchbase_io, dictionary
+from prism import initialize as prism_initialize
 
 
 def build_catalog(args):
@@ -144,6 +145,42 @@ def reset_dictionary(args):
           file=sys.stderr)
 
 
+def initialize(args):
+    """Empty and rebuild the catalog, empty the dictionary, and rebuild the
+    search index from design/fts-index.json - the one thing a user runs after
+    the AI Data Plane workflow finishes, with no separate index setup. Never
+    touches `docs` or anything the workflow itself owns."""
+    print("Initialize will:", file=sys.stderr)
+    for name in prism_initialize.STEPS:
+        print(f"  - {name}", file=sys.stderr)
+    if not _confirm("This empties the catalog and dictionary and rebuilds the "
+                    "search index. docs/chunks are untouched. Proceed?", args.yes):
+        sys.exit("aborted")
+
+    corpus = load_corpus(args.corpus)
+    sectors = corpus.sectors() if hasattr(corpus, "sectors") else {}
+
+    def on_step(i, total, name, status, detail=None):
+        if status == "running":
+            print(f"[{i}/{total}] {name}...", file=sys.stderr)
+        elif status == "error":
+            print(f"[{i}/{total}] {name}: ERROR {detail}", file=sys.stderr)
+        else:
+            print(f"[{i}/{total}] {name}: done", file=sys.stderr)
+
+    def on_catalog_progress(i, total, doc_name, result):
+        status = "ok" if result["ok"] else f"ERROR {result['error']}"
+        print(f"    catalog [{i}/{total}] {doc_name}: {status}", file=sys.stderr)
+
+    summary = prism_initialize.run(model=args.model, sectors=sectors,
+                                   on_step=on_step, on_catalog_progress=on_catalog_progress)
+    ok = sum(1 for r in summary["catalog_results"] if r["ok"])
+    print(f"\ncatalog: {ok}/{len(summary['catalog_results'])} document(s)", file=sys.stderr)
+    print(f"dictionary: cleared {len(summary['dictionary_removed'])} entrie(s)",
+          file=sys.stderr)
+    print("done", file=sys.stderr)
+
+
 def migrate_dictionary(args):
     """One-time: copy dictionary.yaml's entries into Couchbase, which is the
     real persistence target now - repository.py only reads/writes the file
@@ -204,6 +241,13 @@ def main():
     m = sub.add_parser("migrate-dictionary",
                        help="one-time: copy dictionary.yaml's entries into Couchbase")
     m.set_defaults(func=migrate_dictionary)
+
+    i = sub.add_parser("initialize", help="empty+rebuild catalog and dictionary, "
+                                          "rebuild the search index (destructive)")
+    i.add_argument("--corpus", default="financebench")
+    i.add_argument("--model", default=None)
+    i.add_argument("--yes", action="store_true", help="skip confirmation")
+    i.set_defaults(func=initialize)
 
     args = ap.parse_args()
     args.func(args)
