@@ -245,17 +245,27 @@ def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
         conjuncts.append(
             '{"match": $terms, "field": "text-to-embed", "operator": "or"}')
         params["$terms"] = search_terms
+        # A term search should surface the best match first, not page order -
+        # on 3M's 2022 10-K, "current assets" in page order buries the
+        # Working Capital table (page 38, which nets current assets against
+        # current liabilities - the strongest possible match) under a dozen
+        # boilerplate risk-factor pages that only happen to contain "current"
+        # and "assets" separately. SEARCH_SCORE() puts that table first.
+        order_by = "SEARCH_SCORE() DESC"
     else:
         conjuncts.append(
             '{"field": "meta-data.page-number", "min": $page, "max": $page, '
             '"inclusive_min": true, "inclusive_max": true}')
         params["$page"] = page
+        # No relevance to rank by here - an exact filename+page filter is a
+        # deterministic match, not a search. Reading order within the page.
+        order_by = "d.`meta-data`.type, d.`element-id`"
     rows = couchbase_io.query(
-        "SELECT META(d).id AS _id, d.* "
+        "SELECT META(d).id AS _id, d.*, SEARCH_SCORE() AS _score "
         f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d "
         f'WHERE SEARCH(d, {{"query": {{"conjuncts": [{", ".join(conjuncts)}]}}}}, '
         f'{{"index": "{config.FTS_DOCS_INDEX}"}}) '
-        "ORDER BY d.`meta-data`.`page-number`, d.`meta-data`.type, d.`element-id` "
+        f"ORDER BY {order_by} "
         f"LIMIT {int(limit)}",
         params,
     )
@@ -1275,6 +1285,12 @@ with tab_workbench:
                 meta = chunk.get("meta-data") or {}
                 label = (f"p{meta.get('page-number', '?')} · {meta.get('type', '?')} · "
                         f"{chunk.get('element-id', '?')}")
+                if terms:
+                    # Score only means something as a relevance ranking - a
+                    # plain page browse has no query to be relevant TO, so its
+                    # label stays as-is rather than showing a misleadingly
+                    # precise-looking number for a deterministic filter match.
+                    label += f" · score {chunk.get('_score', 0):.3f}"
                 with st.expander(label):
                     if terms:
                         st.markdown("**Matched text, terms highlighted:**")
