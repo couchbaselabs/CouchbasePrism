@@ -140,7 +140,27 @@ def reset_dictionary(args):
     if not _confirm(f"Remove all {len(entries)} entries?", args.yes):
         sys.exit("aborted")
     dictionary.clear()
-    print(f"cleared {config.DICTIONARY_PATH}", file=sys.stderr)
+    print(f"cleared {config.BUCKET}.{config.SCOPE}.{config.DICTIONARY_COLLECTION}",
+          file=sys.stderr)
+
+
+def migrate_dictionary(args):
+    """One-time: copy dictionary.yaml's entries into Couchbase, which is the
+    real persistence target now - repository.py only reads/writes the file
+    when a test passes an explicit path. Safe to run more than once: it's a
+    full replace of the Couchbase collection from the file's current
+    contents, the same replace semantics save() already uses for every other
+    write (approve/forget/clear)."""
+    file_data = dictionary.load(path=config.DICTIONARY_PATH)
+    entries = file_data.get("entries", [])
+    if not entries:
+        sys.exit(f"{config.DICTIONARY_PATH} has no entries — nothing to migrate")
+    couchbase_io.ensure_primary_index(config.DICTIONARY_COLLECTION)
+    dictionary.save(file_data)  # no path -> Couchbase
+    for entry in entries:
+        print(f"migrated {entry.get('id')}", file=sys.stderr)
+    print(f"{len(entries)} entries now in "
+          f"{config.BUCKET}.{config.SCOPE}.{config.DICTIONARY_COLLECTION}", file=sys.stderr)
 
 
 def main():
@@ -180,6 +200,10 @@ def main():
     r = sub.add_parser("reset-dictionary", help="empty the dictionary (cold demo)")
     r.add_argument("--yes", action="store_true", help="skip confirmation")
     r.set_defaults(func=reset_dictionary)
+
+    m = sub.add_parser("migrate-dictionary",
+                       help="one-time: copy dictionary.yaml's entries into Couchbase")
+    m.set_defaults(func=migrate_dictionary)
 
     args = ap.parse_args()
     args.func(args)
