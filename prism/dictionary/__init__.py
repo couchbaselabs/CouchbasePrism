@@ -11,7 +11,7 @@ Two entry types, deliberately separate and independently versioned:
 PRISM may compute a metric without holding authority to judge it.
 
     evaluator   restricted AST evaluation of an approved formula
-    repository  YAML persistence
+    repository  persistence in {bucket}.{scope}.dictionary (YAML for tests only)
     matching    concept -> approved entry
     policy      value + policy -> verdict
     approval    the human decision (approve / forget / clear)

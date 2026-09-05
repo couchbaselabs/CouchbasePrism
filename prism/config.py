@@ -9,6 +9,7 @@ BUCKET = os.environ.get("COUCHBASE_BUCKET", "acme")
 SCOPE = os.environ.get("COUCHBASE_SCOPE", "prism")
 CATALOG_COLLECTION = "catalog"
 DOCS_COLLECTION = "docs"
+DICTIONARY_COLLECTION = "dictionary"
 
 # FTS index names must be FULLY QUALIFIED in N1QL SEARCH() calls; the bare
 # short name fails to resolve.
