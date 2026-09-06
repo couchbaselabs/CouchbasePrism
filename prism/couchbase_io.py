@@ -97,6 +97,71 @@ def delete_search_index(index_name: str) -> None:
     resp.raise_for_status()
 
 
+def search_index_count(index_name: str) -> int:
+    """How many documents the index has processed so far - not the corpus
+    total, the index's OWN progress. Used to know when a freshly (re)created
+    index has caught up, since a drop+recreate starts it from empty and a
+    query against it returns incomplete results until it does."""
+    resp = requests.get(f"{_search_admin_url(index_name)}/count",
+                        auth=config.couchbase_auth(), verify=False, timeout=30)
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("status") != "ok":
+        raise QueryError(f"{body}\nindex: {index_name}")
+    return body["count"]
+
+
+def wait_for_search_index(index_name: str, target_count: int, timeout: int = 300,
+                          poll_interval: int = 3, on_progress=None) -> int:
+    """Polls search_index_count() until it reaches target_count or timeout.
+    Measured live on this corpus: a full reindex of 177,140 documents
+    completes in under a minute, so the default timeout is generous rather
+    than tight. Returns the final observed count; raises TimeoutError if it
+    never reaches the target - callers should treat that as the recreate
+    having failed to converge, not proceed on a partially-built index.
+    """
+    started = time.perf_counter()
+    count = 0
+    while time.perf_counter() - started < timeout:
+        count = search_index_count(index_name)
+        if on_progress:
+            on_progress(count, target_count)
+        if count >= target_count:
+            return count
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"{index_name} reached {count}/{target_count} documents after {timeout}s "
+        "- did not finish reindexing in time")
+
+
+def search_facet(index_name: str, field: str, size: int = 1000) -> list:
+    """Distinct values of an indexed field, with each value's document count -
+    a match_all query with size=0 (no document hits returned, only the
+    facet), so this is cheap regardless of corpus size. Field must be mapped
+    in the index (docs' xmeta-data.filename is text/keyword-analyzed, which
+    facets on the whole string as one term - verified live: returns the same
+    354 distinct filenames as a full N1QL `SELECT DISTINCT` scan, in ~300ms
+    against a query that scan took much longer to run.
+    """
+    resp = requests.post(
+        f"{_search_admin_url(index_name)}/query", auth=config.couchbase_auth(),
+        json={"query": {"match_all": {}}, "size": 0,
+              "facets": {"_": {"field": field, "size": size}}},
+        verify=False, timeout=60,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    # The search-query endpoint's `status` is an object ({"total", "failed",
+    # "successful", "errors"}), not a plain "ok"/"fail" string like the admin
+    # endpoints above - verified live, not assumed. An unmapped/nonexistent
+    # field is NOT an error here either: it comes back status.failed == 0
+    # with an empty facet (no "terms" key), so that case falls through to the
+    # empty-list default rather than raising.
+    if body.get("status", {}).get("failed"):
+        raise QueryError(f"{body}\nindex: {index_name}, field: {field}")
+    return body.get("facets", {}).get("_", {}).get("terms", []) or []
+
+
 def create_search_index(definition: dict) -> None:
     """PUTs a new index from a definition read back from a live index (e.g.
     design/fts-index.json) - which carries three identifiers the SERVER

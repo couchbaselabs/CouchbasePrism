@@ -78,8 +78,21 @@ def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES) -> str:
     per page - but sourced from chunks the AI Data Plane workflow already
     ingested rather than opening the PDF again. No PDF file access needed.
 
-    Footnote-type chunks are excluded: a cover page's company/form/period
-    virtually never lives in one, and they only add token cost here.
+    Goes through the Search Vector Index (SEARCH()), not a plain N1QL WHERE -
+    `docs` carries no secondary index on xmeta-data.filename or
+    meta-data.page-number, only a primary index and the search index, so a
+    plain predicate here was a full PrimaryScan3 over the whole collection
+    PER DOCUMENT catalogued (confirmed live via EXPLAIN - this was the actual
+    cause of catalog rebuild running at 1-2 documents/minute). The same fix
+    that made the document workbench fast applies here: both fields ARE
+    mapped in the search index, so the fetch becomes an IndexFtsSearch
+    instead - verified identical result sets against the old query (same 15
+    rows, same ids) at a fraction of the time, no new index required.
+
+    meta-data.type is NOT mapped in the search index at all, so the footnote
+    exclusion happens in Python after the fetch rather than as a query
+    predicate - the result set here is small enough (a few pages) that this
+    costs nothing.
     """
     rows = query(
         f"""
@@ -88,12 +101,14 @@ def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES) -> str:
                d.`element-id` AS element_id,
                d.`text-to-embed` AS text
         FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d
-        WHERE d.`xmeta-data`.filename = $filename
-          AND d.`meta-data`.`page-number` <= $pages
-          AND d.`meta-data`.type != "footnote"
+        WHERE SEARCH(d, {{"query": {{"conjuncts": [
+          {{"field": "xmeta-data.filename", "match": $filename}},
+          {{"field": "meta-data.page-number", "max": $pages, "inclusive_max": true}}
+        ]}}}}, {{"index": "{config.FTS_DOCS_INDEX}"}})
         """,
         {"$filename": config.source_filename(doc_name), "$pages": pages},
     )
+    rows = [r for r in rows if r.get("type") != "footnote"]
     rows.sort(key=_chunk_sort_key)
     by_page = {}
     for row in rows:
