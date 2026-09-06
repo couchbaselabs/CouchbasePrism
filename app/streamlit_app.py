@@ -308,14 +308,18 @@ def run_initialize(status, sectors: dict) -> dict:
     at import/exec time.
     """
     catalog_bar, catalog_line = None, None
+    index_bar, index_line = None, None
 
     def on_step(i, total, name, step_status, detail=None):
-        nonlocal catalog_bar, catalog_line
+        nonlocal catalog_bar, catalog_line, index_bar, index_line
         if step_status == "running":
             status.write(f"[{i}/{total}] {name}…")
             if name.startswith("Rebuild the catalog"):
                 catalog_bar = st.progress(0.0)
                 catalog_line = st.empty()
+            elif name.startswith("Wait for the search index"):
+                index_bar = st.progress(0.0)
+                index_line = st.empty()
         elif step_status == "error":
             status.write(f"[{i}/{total}] {name}: ERROR {detail}")
 
@@ -326,12 +330,18 @@ def run_initialize(status, sectors: dict) -> dict:
                 f"[{i}/{total}] {doc_name}"
                 + ("" if result["ok"] else f" — ERROR: {result['error']}"))
 
+    def on_index_progress(count, target):
+        if index_bar:
+            index_bar.progress(min(count / target, 1.0) if target else 1.0)
+            index_line.caption(f"{count}/{target} documents reindexed")
+
     # Deliberately model=None: an admin operation, independent of whatever the
     # user picks per-role for answering a question elsewhere in the sidebar
     # (that dict doesn't exist yet at this point in the script anyway). None
     # resolves to config.MODEL_UTILITY, same as manage.py initialize.
     return prism_initialize.run(model=None, sectors=sectors, on_step=on_step,
-                                on_catalog_progress=on_catalog_progress)
+                                on_catalog_progress=on_catalog_progress,
+                                on_index_progress=on_index_progress)
 
 
 def trace_stats(events: list) -> dict:
@@ -1066,12 +1076,15 @@ with st.sidebar:
                "Couchbase AI Data Plane workflow finishes ingesting — no manual "
                "index setup needed.")
     with st.expander("Initialize environment", icon=":material/bolt:"):
-        st.caption("Empties and rebuilds the **catalog** (from ingested chunks, no "
-                   "PDF access), empties the **dictionary**, and rebuilds the "
-                   "**search index** from `design/fts-index.json`. This briefly "
-                   "degrades retrieval while the index reindexes (well under a "
-                   "minute for this corpus). **`docs` and the ingestion workflow "
-                   "are never touched.** Equivalent to `manage.py initialize`.")
+        st.caption("Rebuilds the **search index** from `design/fts-index.json` "
+                   "first and waits for it to fully catch up (well under a "
+                   "minute for this corpus), then rebuilds the **catalog** "
+                   "from ingested chunks through that index (no PDF access) "
+                   "and empties the **dictionary**. Search index first because "
+                   "the catalog rebuild reads through it too - both go through "
+                   "the same index, nothing else. **`docs` and the ingestion "
+                   "workflow are never touched.** Equivalent to "
+                   "`manage.py initialize`.")
         if st.button("Initialize", icon=":material/bolt:", width="stretch",
                      help="Destructive: empties the catalog and dictionary and "
                           "rebuilds the search index. docs/chunks are untouched."):

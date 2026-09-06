@@ -172,8 +172,12 @@ def initialize(args):
         status = "ok" if result["ok"] else f"ERROR {result['error']}"
         print(f"    catalog [{i}/{total}] {doc_name}: {status}", file=sys.stderr)
 
-    summary = prism_initialize.run(model=args.model, sectors=sectors,
-                                   on_step=on_step, on_catalog_progress=on_catalog_progress)
+    def on_index_progress(count, target):
+        print(f"    reindexed {count}/{target} documents", file=sys.stderr)
+
+    summary = prism_initialize.run(model=args.model, sectors=sectors, on_step=on_step,
+                                   on_catalog_progress=on_catalog_progress,
+                                   on_index_progress=on_index_progress)
     ok = sum(1 for r in summary["catalog_results"] if r["ok"])
     print(f"\ncatalog: {ok}/{len(summary['catalog_results'])} document(s)", file=sys.stderr)
     print(f"dictionary: cleared {len(summary['dictionary_removed'])} entrie(s)",

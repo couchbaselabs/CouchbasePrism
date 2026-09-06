@@ -12,8 +12,12 @@ DOCS_COLLECTION = "docs"
 DICTIONARY_COLLECTION = "dictionary"
 
 # FTS index names must be FULLY QUALIFIED in N1QL SEARCH() calls; the bare
-# short name fails to resolve.
-FTS_DOCS_INDEX = f"{BUCKET}.{SCOPE}.ftsFinanceBench"
+# short name fails to resolve there. The Search Service's own REST endpoints
+# (couchbase_io.py's create/delete/count/facet, scoped under /bucket/{b}/
+# scope/{s}/index/{name}) take the bare name instead - the scope already
+# names the bucket and scope, so repeating them in the index name 400s.
+FTS_DOCS_INDEX_NAME = "ftsFinanceBench"
+FTS_DOCS_INDEX = f"{BUCKET}.{SCOPE}.{FTS_DOCS_INDEX_NAME}"
 
 
 def couchbase_host() -> str:
