@@ -5,8 +5,16 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # --- Couchbase -------------------------------------------------------------
-BUCKET = os.environ.get("COUCHBASE_BUCKET", "acme")
-SCOPE = os.environ.get("COUCHBASE_SCOPE", "prism")
+# Fixed, not environment-configurable, by deliberate choice - this is PRISM's
+# own namespace contract, not a per-deployment setting. A customer's Couchbase
+# AI Data Plane workflow has to be pointed at exactly these names for
+# Initialize (and everything downstream of it) to find what it ingested;
+# letting BUCKET/SCOPE vary per environment just adds a way for the app and
+# the workflow to silently disagree about where the data lives. Only the
+# connection string and credentials (couchbase_host/couchbase_auth, below)
+# are meant to vary per deployment.
+BUCKET = "acme"
+SCOPE = "prism"
 CATALOG_COLLECTION = "catalog"
 DOCS_COLLECTION = "docs"
 DICTIONARY_COLLECTION = "dictionary"

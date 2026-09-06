@@ -6,3 +6,8 @@ pyyaml>=6.0
 requests>=2.31
 streamlit>=1.35
 pytest>=8.0
+# S3 upload in the Setup tab (staging sample PDFs for the AI Data Plane
+# workflow to ingest) - credentials are supplied through the UI at upload
+# time, never read from ~/.aws or an env var, so this stays the only place
+# AWS access touches PRISM.
+boto3>=1.34

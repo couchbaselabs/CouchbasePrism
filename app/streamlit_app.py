@@ -28,6 +28,7 @@ from prism import (  # noqa: E402
     catalog, config, couchbase_io, dictionary, retrieval, runtime, trace,
 )
 from prism import initialize as prism_initialize  # noqa: E402
+from prism import s3_upload  # noqa: E402
 
 
 st.set_page_config(
@@ -202,6 +203,23 @@ def load_catalog():
 @st.cache_data(show_spinner=False)
 def load_questions():
     return load_corpus("financebench").questions()
+
+
+def all_sectors() -> dict:
+    """{doc_name: gics_sector} merged across every corpus that's actually
+    present locally - not just financebench's. financebench/ is gitignored
+    and cloned separately, so a self-contained checkout (ftsprism's whole
+    point) legitimately might not have it; sectors() there opens a file
+    unconditionally and would raise on a clean checkout that never cloned
+    it. ftsprism's own sectors always merge in on top since it ships in the
+    repo itself."""
+    merged = {}
+    for name in ("financebench", "ftsprism"):
+        try:
+            merged.update(load_corpus(name).sectors())
+        except OSError:
+            pass
+    return merged
 
 
 def company_catalog(catalog_docs: list, company: str) -> list:
@@ -1071,52 +1089,6 @@ with st.sidebar:
             st.markdown("### Couchbase Prism")
             st.caption("Governed retrieval that works immediately—and learns from reviewed use")
 
-    st.markdown("### Initialize")
-    st.caption(f"{len(catalog_docs)} catalogued document(s). Run this after the "
-               "Couchbase AI Data Plane workflow finishes ingesting — no manual "
-               "index setup needed.")
-    with st.expander("Initialize environment", icon=":material/bolt:"):
-        st.caption("Rebuilds the **search index** from `design/fts-index.json` "
-                   "first and waits for it to fully catch up (well under a "
-                   "minute for this corpus), then rebuilds the **catalog** "
-                   "from ingested chunks through that index (no PDF access) "
-                   "and empties the **dictionary**. Search index first because "
-                   "the catalog rebuild reads through it too - both go through "
-                   "the same index, nothing else. **`docs` and the ingestion "
-                   "workflow are never touched.** Equivalent to "
-                   "`manage.py initialize`.")
-        if st.button("Initialize", icon=":material/bolt:", width="stretch",
-                     help="Destructive: empties the catalog and dictionary and "
-                          "rebuilds the search index. docs/chunks are untouched."):
-            sectors = load_corpus("financebench").sectors()
-            with st.status("Initializing…", expanded=True) as status:
-                try:
-                    summary = run_initialize(status, sectors)
-                except Exception as exc:
-                    status.update(label=f"Initialize failed: {exc}", state="error",
-                                  expanded=True)
-                    st.session_state["initialize_failures"] = []
-                    st.exception(exc)
-                    st.stop()
-                ok = sum(1 for r in summary["catalog_results"] if r["ok"])
-                failed = [r for r in summary["catalog_results"] if not r["ok"]]
-                status.update(
-                    label=f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
-                          f"dictionary cleared ({len(summary['dictionary_removed'])} "
-                          "entrie(s)), search index rebuilt",
-                    state="complete", expanded=False)
-            # st.toast survives the st.rerun() below; st.success/st.error here
-            # would not - same reasoning as the earlier catalog-only button.
-            st.toast(f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
-                    "dictionary and search index rebuilt.",
-                    icon=":material/check_circle:" if not failed else ":material/warning:")
-            st.session_state["initialize_failures"] = failed
-            load_catalog.clear()
-            st.rerun()
-        failures = st.session_state.get("initialize_failures")
-        if failures:
-            st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
-
     st.space("small")
     st.markdown("### Run configuration")
     company = st.selectbox("Company", companies, index=companies.index("3M") if "3M" in companies else 0)
@@ -1202,9 +1174,6 @@ with st.sidebar:
         else:
             st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
 
-    st.space("medium")
-    fts_sidebar()
-
 if custom_question.strip():
     # No FinanceBench reference exists for a question nobody wrote a gold
     # answer for - expected_answer is a display string, not data judge.score
@@ -1232,8 +1201,139 @@ if st.session_state.get("last_selection_key") != selection_key:
     st.session_state.pop("showcase_runs", None)
     st.session_state["last_selection_key"] = selection_key
 
-tab_ask, tab_workbench = st.tabs(
-    [":material/chat: Ask a question", ":material/find_in_page: Document workbench"])
+tab_setup, tab_ask, tab_workbench = st.tabs(
+    [":material/settings: Setup", ":material/chat: Ask a question",
+     ":material/find_in_page: Document workbench"])
+
+with tab_setup:
+    st.caption("Everything a fresh environment needs before the first question can "
+               "be asked - stage sample PDFs, point a Couchbase AI Data Plane "
+               "workflow at them, then build the search index, catalog and "
+               "dictionary from what it ingests. Each section runs independently - "
+               "coming back to run Initialize alone, without re-uploading, is the "
+               "normal case, not a special one.")
+
+    section("Upload sample PDFs to S3", icon=":material/upload:",
+            caption="Straight upload, no S3 object metadata - one subfolder per "
+                    "company, matching eval/corpora/ftsprism/pdfs/{company}/ "
+                    "exactly. Credentials are used for this upload only - never "
+                    "written to disk, a config file, or session state beyond the "
+                    "click that submits them.")
+    pdf_root = REPO_ROOT / "eval" / "corpora" / "ftsprism" / "pdfs"
+    available = s3_upload.find_pdfs(pdf_root)
+    by_company = {}
+    for company, path in available:
+        by_company.setdefault(company, []).append(path)
+    if not available:
+        st.info(f"No PDFs found under {pdf_root} yet.", icon=":material/info:")
+    else:
+        st.caption(", ".join(f"{c} ({len(p)})" for c, p in sorted(by_company.items()))
+                  + f" — {len(available)} PDF(s) total")
+        with st.form("s3_upload_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                s3_bucket = st.text_input("S3 bucket name")
+                s3_region = st.text_input("AWS region", value="us-west-2")
+            with col2:
+                s3_prefix = st.text_input("Folder (prefix)", value="ftsprism")
+                s3_access_key = st.text_input("AWS access key ID", type="password")
+            s3_secret_key = st.text_input("AWS secret access key", type="password")
+            s3_session_token = st.text_input(
+                "AWS session token (optional, for temporary credentials)",
+                type="password")
+            submitted = st.form_submit_button(
+                "Upload to S3", icon=":material/upload:", width="stretch")
+        if submitted:
+            if not (s3_bucket and s3_access_key and s3_secret_key):
+                st.error("Bucket name, access key and secret key are required.")
+            else:
+                progress_bar = st.progress(0.0)
+                progress_line = st.empty()
+
+                def on_s3_progress(i, total, company, filename, ok, error=None):
+                    progress_bar.progress(i / total)
+                    progress_line.caption(
+                        f"[{i}/{total}] {company}/{filename}"
+                        + ("" if ok else f" — ERROR: {error}"))
+
+                result = s3_upload.upload_pdfs(
+                    pdf_root, bucket=s3_bucket.strip(), prefix=s3_prefix.strip(),
+                    access_key=s3_access_key, secret_key=s3_secret_key,
+                    region=s3_region.strip(),
+                    session_token=s3_session_token.strip() or None,
+                    on_progress=on_s3_progress)
+                if result["failed"]:
+                    st.warning(f"{len(result['uploaded'])}/{len(available)} uploaded, "
+                              f"{len(result['failed'])} failed.")
+                    st.error("\n".join(f"{f['key']}: {f['error']}"
+                                      for f in result["failed"]))
+                else:
+                    st.success(f"{len(result['uploaded'])}/{len(available)} PDF(s) "
+                              f"uploaded to s3://{s3_bucket}/{s3_prefix}/")
+
+    st.space("medium")
+    section("Create the ingestion workflow", icon=":material/account_tree:",
+            caption="Brief, on purpose - creating this from PRISM itself is a "
+                    "stretch goal, not built yet.")
+    st.markdown(
+        "1. In Capella, open **AI Services → Workflows** and create a new workflow.\n"
+        f"2. Point its source at the S3 bucket/folder used above.\n"
+        f"3. Set the destination to `{config.BUCKET}.{config.SCOPE}.{config.DOCS_COLLECTION}` "
+        "— bucket, scope and collection names are fixed (see the Search Vector "
+        "Index panel below for what's already mapped there) and must match exactly.\n"
+        "4. Run the workflow - it chunks, embeds, and stores every PDF as chunks "
+        "in that collection.\n"
+        "5. Once it finishes, run **Initialize** below.")
+
+    st.space("medium")
+    section("Initialize", icon=":material/bolt:",
+            caption=f"{len(catalog_docs)} catalogued document(s). Run this after "
+                    "the Couchbase AI Data Plane workflow finishes ingesting - no "
+                    "manual index setup needed. Independent of the upload above - "
+                    "coming back to run this alone, on whatever's already been "
+                    "ingested, is the normal case.")
+    with st.expander("Initialize environment", icon=":material/bolt:"):
+        st.caption("Rebuilds the **search index** from `design/fts-index.json` "
+                   "first and waits for it to fully catch up (well under a "
+                   "minute for this corpus), then rebuilds the **catalog** "
+                   "from ingested chunks through that index (no PDF access) "
+                   "and empties the **dictionary**. Search index first because "
+                   "the catalog rebuild reads through it too - both go through "
+                   "the same index, nothing else. **`docs` and the ingestion "
+                   "workflow are never touched.** Equivalent to "
+                   "`manage.py initialize`.")
+        if st.button("Initialize", icon=":material/bolt:", width="stretch",
+                     help="Destructive: empties the catalog and dictionary and "
+                          "rebuilds the search index. docs/chunks are untouched."):
+            with st.status("Initializing…", expanded=True) as status:
+                try:
+                    summary = run_initialize(status, all_sectors())
+                except Exception as exc:
+                    status.update(label=f"Initialize failed: {exc}", state="error",
+                                  expanded=True)
+                    st.session_state["initialize_failures"] = []
+                    st.exception(exc)
+                    st.stop()
+                ok = sum(1 for r in summary["catalog_results"] if r["ok"])
+                failed = [r for r in summary["catalog_results"] if not r["ok"]]
+                status.update(
+                    label=f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
+                          f"dictionary cleared ({len(summary['dictionary_removed'])} "
+                          "entrie(s)), search index rebuilt",
+                    state="complete", expanded=False)
+            # st.toast survives the st.rerun() below; st.success/st.error here
+            # would not - same reasoning as the earlier catalog-only button.
+            st.toast(f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
+                    "dictionary and search index rebuilt.",
+                    icon=":material/check_circle:" if not failed else ":material/warning:")
+            st.session_state["initialize_failures"] = failed
+            load_catalog.clear()
+            st.rerun()
+        failures = st.session_state.get("initialize_failures")
+        if failures:
+            st.error("\n".join(f"{r['doc_name']}: {r['error']}" for r in failures))
+    st.space("medium")
+    fts_sidebar()
 
 with tab_ask:
     with st.container(border=True, key="prompt-card"):
