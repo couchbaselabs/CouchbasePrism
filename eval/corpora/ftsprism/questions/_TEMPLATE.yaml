@@ -1,0 +1,69 @@
+# TEMPLATE - copy this file, rename to a descriptive-slug.yaml (the filename,
+# minus .yaml, becomes the question's id - no separate id: field, so the id
+# and the filename can never drift apart). Leading "_" files (this one
+# included) are ignored by the loader, so the template is never picked up as
+# a real question.
+#
+# Fill in every field below, then delete these comments.
+
+doc_name: EXAMPLE_2022_10K        # must match an entry in ../documents.yaml
+
+question: >
+  Write an ORIGINAL question in your own words - do not paraphrase a
+  FinanceBench question, even one in the same category. Facts and plain
+  phrasing ("what was X's metric Y for period Z") aren't the risk; copying
+  their specific wording is what to avoid.
+
+concept: null                      # e.g. "quick_ratio" when this question is
+                                    # answered by a formula that also has a
+                                    # dictionary.yaml entry of the same name;
+                                    # null for a direct-extraction question.
+
+formula: null                      # the exact expression that produces
+                                    # expected_answer below, e.g.
+                                    # "(current_assets - inventory) / current_liabilities"
+                                    # null if this is a direct extraction, not
+                                    # a computed metric.
+
+expected_answer: "REPLACE_ME"
+
+keywords:                          # literal lexical terms a BM25/keyword
+  - "REPLACE_ME"                   # search should be able to match this
+                                    # question on - what makes the corpus
+                                    # useful for demonstrating hybrid fusion
+                                    # (not just vector recall).
+
+tags:                               # categorizes the QUESTION, not what it's
+  - "REPLACE_ME"                   # findable by (that's keywords, above) -
+                                    # reasoning type and shape, e.g.
+                                    # numerical-reasoning | extraction |
+                                    # table | single-document | multi-document
+
+gold_answer:                        # optional - only for a question whose
+  value: null                       # answer is a specific number. Alongside
+  unit: null                        # expected_answer (still what the LLM
+  tolerance: null                   # judge compares against), not instead of
+                                    # it - lets a numeric question eventually
+                                    # be graded by exact match instead of
+                                    # judged semantically. Delete this whole
+                                    # block for a non-numeric question.
+
+evidence:
+  - page: 0                        # 1-indexed, matching the PDF's own page number
+    title: "REPLACE_ME"            # the section/table heading as printed
+    type: text                     # text | table - matches meta-data.type in
+                                    # the ingested chunk schema
+    table_name: null                # only set when type: table
+    text: >
+      A short, verbatim quote from the filing itself - not from any third
+      party's annotation of it - that grounds expected_answer.
+
+lineage:
+  method: manual                   # manual | prism-assisted (drafted by
+                                    # PRISM's own answer pipeline, then
+                                    # human-reviewed)
+  authored_by: "REPLACE_ME"
+  verified: false                  # true only once a human has checked the
+                                    # value and evidence against the actual
+                                    # filing
+  added_at: "REPLACE_ME"
