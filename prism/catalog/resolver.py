@@ -178,9 +178,20 @@ def period_from_question(question: str):
     # FY2016 column to compare against at all - resolved to a real document,
     # confidently, just the wrong one. Prefer the latest year mentioned;
     # single-year questions are unaffected since max() of one value is itself.
+    #
+    # fy_years and bare_years are MERGED, not `fy_years or bare_years` - a
+    # question can mix styles ("...for the full year 2023... compared to
+    # FY2022"), where the subject year is bare and the comparison year is
+    # FY-prefixed. `or` picked fy_years exclusively whenever any FY-prefixed
+    # year existed, silently discarding a larger bare year and resolving to
+    # the wrong (earlier) filing - confirmed live, the same failure shape as
+    # the quarter-word gap above, just on the year side. Merging is safe from
+    # double-counting: "FY2022"'s own "2022" never independently matches the
+    # bare pattern too, since \b requires a non-word/word boundary and there
+    # isn't one between "Y" and "2" in "FY2022" - verified live, not assumed.
     fy_years = [int(y) for y in re.findall(r"\bFY\s*(\d{4})\b", question, re.IGNORECASE)]
     bare_years = [int(y) for y in re.findall(r"\b(20\d{2})\b", question)]
-    years = fy_years or bare_years
+    years = fy_years + bare_years
     return (max(years) if years else None), quarter
 
 

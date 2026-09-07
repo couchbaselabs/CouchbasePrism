@@ -110,6 +110,22 @@ def test_period_from_question_with_no_quarter_mentioned():
     assert period_from_question("FY2022 revenue") == (2022, None)
 
 
+def test_period_from_question_merges_mixed_bare_and_fy_prefixed_years():
+    # A subject year stated bare ("full year 2023") and a comparison year
+    # stated FY-prefixed ("FY2022") in the SAME question used to resolve to
+    # the earlier (FY-prefixed) year only - `fy_years or bare_years` picked
+    # fy_years exclusively whenever any existed, silently discarding a larger
+    # bare year. Found live on a real authored question ("...for the full
+    # year 2023... compared to FY2022"): resolved to 3M_2022_10K instead of
+    # 3M_2023_10K.
+    assert period_from_question(
+        "Operating margin for the full year 2023 compared to FY2022") \
+        == (2023, None)
+    # And the reverse order/style doesn't regress either.
+    assert period_from_question(
+        "Compared to FY2020, what was the 2021 margin?") == (2021, None)
+
+
 # ------------------------------------------------------------- identifiers
 
 def test_human_labels_become_formula_safe_identifiers():
