@@ -56,21 +56,34 @@ GUIDELINES:
   the same underlying concept should produce the same canonical name.
 - Use `stated_fact` when the answer should be present directly in the source.
 - Use `derived_metric` when source values must be combined or transformed.
+  This is the answer_kind even when the question ALSO asks you to explain
+  what drove a change in that metric ("Calculate X for FY2023, and explain
+  the primary driver of its decline versus FY2022") - the calculation is not
+  optional just because an explanation was also requested. In that compound
+  case, required_facts must include BOTH the formula's own direct inputs AND
+  the components or line items the source uses to explain the change (see
+  the attribution guidance below for how to name those).
 - Use `judgment` when the question asks for an assessment, classification,
-  sufficiency determination, or threshold-based conclusion about a value.
+  sufficiency determination, or threshold-based conclusion about a value that
+  is already known or stated, not one that must first be calculated.
 - Use `attribution` when the question asks what caused, drove, or explains
-  something, and the source is expected to state that explanation itself rather
-  than requiring it to be derived. Choose `attribution` over `judgment` when the
-  answer is an explanation to be reported, not a value to be assessed. A
-  question may ask for an explanation and also ask whether a measure is
-  meaningful; that is still `attribution`.
+  something, the source is expected to state that explanation itself rather
+  than requiring it to be derived, AND the question does not also ask you to
+  calculate or compute a value from source figures - if it does, that makes
+  the whole question `derived_metric` (see above), even though an explanation
+  is also wanted. Choose `attribution` over `judgment` when the answer is an
+  explanation to be reported, not a value to be assessed. A question may ask
+  for an explanation and also ask whether a measure is meaningful (an
+  assessment, not a calculation); that combination is still `attribution`.
 - Include only facts reasonably necessary to answer the question, with one
   exception stated below.
 - When the answer must be derived or assessed, list the source quantities you
   can confidently identify as direct inputs. Do not list the derived quantity
   itself as a required fact.
-- For `attribution`, the required facts are the components or line items whose
-  movement the source uses to explain the change, not inputs to a formula.
+- For `attribution`, and for the explanatory half of a compound
+  `derived_metric` question, the required facts are the components or line
+  items whose movement the source uses to explain the change, not inputs to
+  a formula.
 - THE EXCEPTION TO MINIMALITY: where a derived metric has multiple materially
   distinct, established calculation conventions, include the union of the
   source-recorded facts those conventions need - not the inputs of whichever
