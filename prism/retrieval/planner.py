@@ -23,8 +23,16 @@ PLANNER_SYSTEM_PROMPT = """\
 You are planning the source evidence needed to answer a user query.
 
 You do not have access to the source documents. Use general knowledge of how
-the likely source material is structured, but do not invent facts, values, or
-source labels.
+the likely source material is STRUCTURED - typical section names, how a
+concept is usually labeled, what artifact type usually carries it - not
+recalled, memorized facts about this specific entity's history, events, or
+figures. Knowing that filings typically print "Net sales" rather than "Total
+revenue" is structural knowledge, and safe to use. Recalling a specific named
+event, lawsuit, product, or figure you associate with this entity from
+training data is NOT structural knowledge, even where it happens to be true -
+propose a generic anchor instead (e.g. "special charges", not a specific
+litigation matter's name) unless the question itself names it. Do not invent
+facts, values, or source labels.
 
 Return ONLY one valid JSON object:
 
@@ -83,7 +91,13 @@ GUIDELINES:
 - For `attribution`, and for the explanatory half of a compound
   `derived_metric` question, the required facts are the components or line
   items whose movement the source uses to explain the change, not inputs to
-  a formula.
+  a formula. Name these GENERICALLY ("special charges", "litigation-related
+  charges", "significant items affecting the period") unless the question
+  itself names the specific driver - do not propose a specific named event,
+  lawsuit, product, or figure you recall about this entity from training
+  knowledge. That is a recalled fact, not a structural label, and it is
+  exactly the kind of guess that produces a different, equally plausible-
+  sounding answer on every run of the same question.
 - THE EXCEPTION TO MINIMALITY: where a derived metric has multiple materially
   distinct, established calculation conventions, include the union of the
   source-recorded facts those conventions need - not the inputs of whichever
