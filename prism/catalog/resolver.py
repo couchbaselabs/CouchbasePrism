@@ -135,16 +135,28 @@ def event_date_from_question(question: str):
     2022", "the separation announced August 30, 2023". A report filed on a date
     is a different document from the annual report covering that year, and the
     date is the only thing distinguishing them.
+
+    Returns None when the question names MORE THAN ONE distinct date - that is
+    a comparison across two period-end dates ("between December 31, 2023 and
+    December 31, 2024"), not a lookup for one specific filing event. This
+    function outranks period_from_question() in resolve_for_question() (a
+    named date is more specific than a mere year), so returning just the
+    first date found sent a working-capital question comparing two fiscal
+    year-ends to the EARLIER year's 10-K - a real document, confidently
+    wrong - found live, the same failure shape as the other resolver gaps:
+    a mechanism built for one genuine case fired on a different one it was
+    never meant to handle.
     """
     text = (question or "").lower()
+    found = []
     for pattern in (r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+),?\s+(\d{4})\b",
                     r"\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b"):
         for match in re.finditer(pattern, text):
             a, b, year = match.groups()
             day, month = (a, _MONTHS.get(b)) if a.isdigit() else (b, _MONTHS.get(a))
             if month:
-                return f"{int(year):04d}-{month:02d}-{int(day):02d}"
-    return None
+                found.append(f"{int(year):04d}-{month:02d}-{int(day):02d}")
+    return found[0] if len(set(found)) == 1 else None
 
 
 _QUARTER_WORDS = {"1st": 1, "first": 1, "2nd": 2, "second": 2,

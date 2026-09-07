@@ -3,7 +3,7 @@ validation and conclusion agreement. Each case below corresponds to a bug that
 actually occurred during the FinanceBench evaluation."""
 from prism import catalog, retrieval, runtime, trace
 from prism.catalog.extraction import _chunk_sort_key
-from prism.catalog.resolver import period_from_question
+from prism.catalog.resolver import event_date_from_question, period_from_question
 
 CATALOG = [
     {"doc_name": "3M_2018_10K", "doc_type": "10-K", "doc_period": 2018,
@@ -124,6 +124,26 @@ def test_period_from_question_merges_mixed_bare_and_fy_prefixed_years():
     # And the reverse order/style doesn't regress either.
     assert period_from_question(
         "Compared to FY2020, what was the 2021 margin?") == (2021, None)
+
+
+def test_event_date_from_question_ignores_a_between_two_dates_comparison():
+    # event_date_from_question outranks period_from_question in
+    # resolve_for_question (a named date is more specific than a mere year),
+    # so returning the FIRST of two dates in a "between X and Y" comparison
+    # sent a working-capital question comparing two fiscal year-ends to the
+    # EARLIER year's 10-K - found live on a real authored question. Two
+    # distinct dates means this is a period comparison, not a single filing
+    # lookup - defer to period_from_question's year-based resolution instead.
+    assert event_date_from_question(
+        "working capital between December 31, 2023 and December 31, 2024") \
+        is None
+
+
+def test_event_date_from_question_still_finds_one_genuine_event_date():
+    assert event_date_from_question(
+        "What did X report on August 30, 2023?") == "2023-08-30"
+    assert event_date_from_question(
+        "the 8k filing dated 1st July 2022") == "2022-07-01"
 
 
 # ------------------------------------------------------------- identifiers
