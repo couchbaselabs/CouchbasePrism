@@ -17,6 +17,11 @@ import pymupdf
 
 from .. import config, llm
 from ..couchbase_io import query
+from .resolver import form_of
+
+_QUARTER_OF_MONTH = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3, 9: 3,
+                     10: 4, 11: 4, 12: 4}
+_QUARTER_WORDS = {1: "first Q1", 2: "second Q2", 3: "third Q3", 4: "fourth Q4"}
 
 COVER_PAGES = 5
 FIELDS = ["company", "doc_type", "period_end_date"]
@@ -200,6 +205,41 @@ def fiscal_year(iso_date: str):
     return year - 1 if month == 1 and day <= 7 else year
 
 
+def _search_label(company: str, doc_type: str, doc_period, period_end_date_iso: str) -> str:
+    """A rich, natural-language description of a catalog entry - built
+    entirely from fields already known deterministically (no new
+    classification, no LLM call), so a search index over it can match
+    however a question happens to phrase a period ("third quarter of 2022",
+    "Q3 2022", "September 2022") without any regex extracting that phrasing
+    into structured year/quarter first. That regex extraction is exactly
+    what produced three separate resolver bugs this session - each one a
+    mechanism built for one phrasing failing on a different one. A BM25
+    match against natural text sidesteps the whole class of gap: it doesn't
+    care which words the question used, only whether they overlap with
+    words already in this label.
+
+    Quarter is derived from period_end_date_iso's month - safe, since which
+    calendar quarter a date falls in is arithmetic, not something to guess."""
+    form = form_of(doc_type) or (doc_type or "")
+    bits = [company or "", form]
+    if form == "10-Q" and period_end_date_iso and len(period_end_date_iso) >= 7:
+        month = int(period_end_date_iso[5:7])
+        quarter = _QUARTER_OF_MONTH.get(month)
+        if quarter:
+            bits.append(f"{_QUARTER_WORDS[quarter]} quarter quarterly report")
+    elif form == "10-K":
+        bits.append("annual report full year fiscal year")
+    elif form == "DEF 14A":
+        bits.append("proxy statement annual meeting")
+    elif form == "8-K":
+        bits.append("current report")
+    if doc_period:
+        bits.append(f"fiscal {doc_period} FY{doc_period} {doc_period}")
+    if period_end_date_iso:
+        bits.append(f"period ended {period_end_date_iso}")
+    return " ".join(b for b in bits if b)
+
+
 def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
                    extractor: str = "pymupdf-sort+closed-set-classification",
                    source_filename: str = None) -> dict:
@@ -243,6 +283,10 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
         document["lineage"]["gics_sector"] = "corpus_metadata"
     if source_filename:
         document["source_filename"] = source_filename
+    document["search_label"] = _search_label(
+        (document["company"] or {}).get("value"),
+        (document["doc_type"] or {}).get("value"),
+        document["doc_period"], document["period_end_date_iso"])
     return document
 
 

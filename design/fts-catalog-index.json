@@ -1,0 +1,171 @@
+{
+  "type": "fulltext-index",
+  "name": "ftsPrismCatalog",
+  "sourceType": "gocbcore",
+  "sourceName": "acme",
+  "planParams": {
+    "maxPartitionsPerPIndex": 128,
+    "indexPartitions": 1,
+    "numReplicas": 1
+  },
+  "params": {
+    "doc_config": {
+      "docid_prefix_delim": "",
+      "docid_regexp": "",
+      "mode": "scope.collection.type_field",
+      "type_field": "type"
+    },
+    "mapping": {
+      "analysis": {},
+      "default_analyzer": "standard",
+      "default_datetime_parser": "dateTimeOptional",
+      "default_field": "_all",
+      "default_mapping": {
+        "dynamic": false,
+        "enabled": false
+      },
+      "default_type": "_default",
+      "docvalues_dynamic": false,
+      "index_dynamic": true,
+      "scoring_model": "bm25",
+      "store_dynamic": false,
+      "type_field": "_type",
+      "types": {
+        "prism.catalog": {
+          "dynamic": false,
+          "enabled": true,
+          "properties": {
+            "doc_name": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "keyword",
+                  "index": true,
+                  "name": "doc_name",
+                  "type": "text"
+                }
+              ]
+            },
+            "source_filename": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "keyword",
+                  "index": true,
+                  "name": "source_filename",
+                  "type": "text"
+                }
+              ]
+            },
+            "doc_period": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "index": true,
+                  "name": "doc_period",
+                  "type": "number"
+                }
+              ]
+            },
+            "period_end_date_iso": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "index": true,
+                  "name": "period_end_date_iso",
+                  "type": "datetime"
+                }
+              ]
+            },
+            "gics_sector": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "en",
+                  "index": true,
+                  "name": "gics_sector",
+                  "type": "text"
+                }
+              ]
+            },
+            "aliases": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "en",
+                  "index": true,
+                  "name": "aliases",
+                  "type": "text"
+                }
+              ]
+            },
+            "company": {
+              "dynamic": false,
+              "enabled": true,
+              "properties": {
+                "value": {
+                  "dynamic": false,
+                  "enabled": true,
+                  "fields": [
+                    {
+                      "analyzer": "en",
+                      "index": true,
+                      "name": "value",
+                      "type": "text"
+                    }
+                  ]
+                }
+              }
+            },
+            "doc_type": {
+              "dynamic": false,
+              "enabled": true,
+              "properties": {
+                "value": {
+                  "dynamic": false,
+                  "enabled": true,
+                  "fields": [
+                    {
+                      "analyzer": "keyword",
+                      "index": true,
+                      "name": "value",
+                      "type": "text"
+                    }
+                  ]
+                }
+              }
+            },
+            "search_label": {
+              "dynamic": false,
+              "enabled": true,
+              "fields": [
+                {
+                  "analyzer": "en",
+                  "index": true,
+                  "name": "search_label",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "sourceParams": {
+    "scopeParams": {
+      "collections": [
+        {
+          "name": "catalog"
+        }
+      ],
+      "name": "prism"
+    }
+  }
+}

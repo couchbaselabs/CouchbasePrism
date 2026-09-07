@@ -1,0 +1,43 @@
+doc_name: 3M_8K_2023-07-25_000056_earnings
+
+question: >
+  What was 3M's reported Adjusted Free Cash Flow Conversion for the second quarter of 2023, and what formula was used to derive it?
+
+concept: adjusted free cash flow conversion
+
+formula: (adjusted_free_cash_flow / adjusted_net_income_attributable_to_3m) * 100
+
+expected_answer: "122%"
+
+keywords:
+  - "Adjusted free cash flow conversion"
+  - "Adjusted free cash flow"
+  - "Adjusted net income (loss) attributable to 3M"
+
+tags:
+  - non-gaap
+  - single-document
+  - ratio-calculation
+  - earnings-release
+
+gold_answer:
+  value: 121.5116
+  unit: percentage
+  tolerance: 0.5
+
+evidence:
+  - page: 11
+    title: "Supplemental Financial Information - Non-GAAP Measures (Continued)"
+    type: table
+    table_name: "Adjusted Free Cash Flow (non-GAAP measure)"
+    text: >
+      Three months ended June 30, 2023:
+      Adjusted free cash flow: $1,463 million
+      Adjusted net income attributable to 3M: $1,204 million
+      Adjusted free cash flow conversion: 122%
+
+lineage:
+  method: manual-curated
+  authored_by: "gemini+prasad"
+  verified: true
+  added_at: "2026-09-07"

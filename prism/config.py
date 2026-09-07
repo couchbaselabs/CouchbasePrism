@@ -35,6 +35,15 @@ DICTIONARY_COLLECTION = "dictionary"
 FTS_DOCS_INDEX_NAME = "ftsPrism"
 FTS_DOCS_INDEX = f"{BUCKET}.{SCOPE}.{FTS_DOCS_INDEX_NAME}"
 
+# Search index over the CATALOG collection (not docs) - lets document
+# resolution narrow a shortlist via SEARCH() instead of loading every
+# catalog entry into Python and scanning it, which does not survive past a
+# few thousand documents let alone the "millions of docs" scale this was
+# built for. design/fts-catalog-index.json is the captured definition;
+# Initialize rebuilds it the same way it rebuilds FTS_DOCS_INDEX.
+FTS_CATALOG_INDEX_NAME = "ftsPrismCatalog"
+FTS_CATALOG_INDEX = f"{BUCKET}.{SCOPE}.{FTS_CATALOG_INDEX_NAME}"
+
 
 def couchbase_host() -> str:
     return os.environ["COUCHBASE_CONN_STRING"].replace("couchbases://", "")

@@ -40,26 +40,38 @@ STEPS = [
     "Ensure primary index — catalog",
     "Ensure primary index — dictionary",
     "Rebuild the catalog from ingested chunks",
+    "Drop the catalog search index",
+    "Recreate the catalog search index",
+    "Wait for the catalog search index to catch up",
     "Clear the dictionary",
 ]
 
 FTS_INDEX_DEFINITION_PATH = config.REPO_ROOT / "design" / "fts-index.json"
+FTS_CATALOG_INDEX_DEFINITION_PATH = config.REPO_ROOT / "design" / "fts-catalog-index.json"
 
 
 def run(model: str = None, sectors: dict = None, on_step=None,
        on_catalog_progress=None, on_index_progress=None) -> dict:
-    """Runs all seven steps in order, stopping at the first failure - a later
+    """Runs all ten steps in order, stopping at the first failure - a later
     step assumes every earlier one succeeded, and continuing past a real
     failure (a catalog rebuild reading from a half-built index, a dictionary
     clear after something upstream silently didn't finish) is worse than
     stopping loudly.
+
+    The catalog's own search index (ftsPrismCatalog - backs
+    catalog.resolve_for_question_at_scale, the FTS-shortlist-then-LLM-pick
+    resolution path) is recreated AFTER the catalog rebuild, not before -
+    the opposite order from the docs index. Each catalog entry's
+    search_label (see extraction.py's _search_label) is computed as part of
+    the rebuild itself, so recreating this index earlier would just index
+    stale or absent labels from before the rebuild ran.
 
     on_step(index_1_based, total, name, status, detail=None) fires before
     ("running") and after ("done"/"error") each step, so a caller can render
     progress without depending on this module's internals.
     on_catalog_progress passes straight through to catalog.rebuild_from_chunks
     for its own per-document progress; on_index_progress passes through to
-    couchbase_io.wait_for_search_index for the reindex-catch-up step.
+    couchbase_io.wait_for_search_index for BOTH reindex-catch-up steps.
 
     Returns {"steps": [{"name", "ok", "error"?}, ...], "catalog_results": [...],
     "dictionary_removed": [...]}.
@@ -68,8 +80,14 @@ def run(model: str = None, sectors: dict = None, on_step=None,
         raise FileNotFoundError(
             f"{FTS_INDEX_DEFINITION_PATH} is missing - Initialize needs the "
             "search index definition on disk to recreate the index from.")
+    if not FTS_CATALOG_INDEX_DEFINITION_PATH.exists():
+        raise FileNotFoundError(
+            f"{FTS_CATALOG_INDEX_DEFINITION_PATH} is missing - Initialize needs "
+            "the catalog search index definition on disk to recreate it from.")
     definition = json.loads(FTS_INDEX_DEFINITION_PATH.read_text())
     index_name = definition["name"]
+    catalog_index_definition = json.loads(FTS_CATALOG_INDEX_DEFINITION_PATH.read_text())
+    catalog_index_name = catalog_index_definition["name"]
 
     summary = {"steps": []}
 
@@ -95,6 +113,13 @@ def run(model: str = None, sectors: dict = None, on_step=None,
         return couchbase_io.wait_for_search_index(
             index_name, target_count=target, on_progress=on_index_progress)
 
+    def wait_for_catalog_index():
+        target = couchbase_io.query(
+            f"SELECT RAW COUNT(*) FROM `{config.BUCKET}`.`{config.SCOPE}`."
+            f"`{config.CATALOG_COLLECTION}`")[0]
+        return couchbase_io.wait_for_search_index(
+            catalog_index_name, target_count=target, on_progress=on_index_progress)
+
     step(0, lambda: couchbase_io.delete_search_index(index_name))
     step(1, lambda: couchbase_io.create_search_index(definition))
     step(2, wait_for_index)
@@ -102,6 +127,9 @@ def run(model: str = None, sectors: dict = None, on_step=None,
     step(4, lambda: couchbase_io.ensure_primary_index(config.DICTIONARY_COLLECTION))
     summary["catalog_results"] = step(5, lambda: catalog.rebuild_from_chunks(
         model=model, sectors=sectors, on_progress=on_catalog_progress))
-    summary["dictionary_removed"] = step(6, dictionary.clear)
+    step(6, lambda: couchbase_io.delete_search_index(catalog_index_name))
+    step(7, lambda: couchbase_io.create_search_index(catalog_index_definition))
+    step(8, wait_for_catalog_index)
+    summary["dictionary_removed"] = step(9, dictionary.clear)
 
     return summary

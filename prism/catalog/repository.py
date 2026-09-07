@@ -37,7 +37,7 @@ def load_all() -> list:
         return query(
             "SELECT d.doc_name, d.doc_type.`value` AS doc_type, d.doc_period, "
             "d.period_end_date_iso, d.company.`value` AS company, d.gics_sector, "
-            "d.aliases, d.source_filename "
+            "d.aliases, d.source_filename, d.search_label "
             f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d"
         )
     except QueryError as e:

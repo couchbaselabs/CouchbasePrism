@@ -899,6 +899,17 @@ def render_detail(run: dict):
         status_badge(verdict["passed"])
         st.badge(result["resolved_doc"] or "Unscoped", icon=":material/description:",
                  color="blue")
+    # Only present when Document resolution = AI (FTS shortlist + LLM pick) -
+    # the deterministic path has no comparable "why" to show, it's regex.
+    detail = result.get("resolution_detail")
+    if detail:
+        picked = detail.get("selected_documents") or []
+        if picked:
+            st.caption("Resolved by AI: " + "; ".join(
+                f"{d['doc_name']} — {d.get('reason', '')}" for d in picked))
+        else:
+            st.caption("AI resolution declined — no candidate matched: "
+                      + "; ".join(detail.get("missing_evidence") or ["no reason given"]))
 
     with st.container(border=True, key="answer-card"):
         st.markdown(f"### {q['question']}")
@@ -1180,6 +1191,22 @@ with st.sidebar:
     else:
         fusion = None
         tuning = {}
+
+    resolution = st.segmented_control(
+        "Document resolution", ["deterministic", "fts_llm"], default="deterministic",
+        required=True, width="stretch",
+        format_func=lambda r: {"deterministic": "Deterministic (regex)",
+                              "fts_llm": "AI (FTS shortlist + LLM pick)"}[r])
+    st.caption(
+        "Regex-based year/quarter/date parsing over the whole catalog in "
+        "Python - fast, but found 3 real gaps this session on natural "
+        "phrasing it wasn't written to expect."
+        if resolution == "deterministic" else
+        "Catalog's own search index narrows to a shortlist, a cheap LLM call "
+        "picks from it - scales past what loading the whole catalog into "
+        "Python can, and isn't limited to phrasing a regex anticipated. New "
+        "and less battle-tested than the deterministic path.")
+    tuning["resolution"] = resolution
 
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],
                                     default="OpenAI", required=True, width="stretch")

@@ -51,6 +51,14 @@ def describe_source(entry: dict) -> str:
 class PipelineOptions:
     """Which capabilities are active. Defaults are the full runtime."""
     catalog_filter: bool = True   # scope retrieval to one resolved document
+    resolution: str = "deterministic"  # "deterministic" (resolver.py, regex-
+                                       # based) or "fts_llm" (catalog/
+                                       # fts_resolver.py: FTS shortlist + a
+                                       # cheap LLM pick) - a NEW, separate
+                                       # path kept opt-in specifically so it
+                                       # can be compared against the
+                                       # deterministic one, not silently
+                                       # replace it unproven.
     anchors: bool = True          # content-anchor retrieval from the plan
     bm25: bool = False            # hybrid BM25 + kNN via the Search Vector Index
     title_boost: float = 0.0      # boost associated-titles in BM25 (unreliable)
@@ -82,8 +90,20 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     # leg, further down; it is a no-op for every other retrieval path.
     question, forced_phrases = retrieval.extract_phrase_terms(question)
 
-    doc_name = (catalog.resolve_for_question(catalog_docs, question)
-                if options.catalog_filter else None)
+    resolution_detail = None
+    if not options.catalog_filter:
+        doc_name = None
+    elif options.resolution == "fts_llm":
+        # search_candidates()/llm_resolve() never load catalog_docs at all -
+        # the whole point is not needing the full catalog in Python to
+        # resolve one question. catalog_docs is still used below to look up
+        # the picked entry's other fields (gics_sector, etc.) - a targeted,
+        # single-document lookup, not the scan this path exists to avoid.
+        resolution_detail = catalog.resolve_for_question_at_scale(question, model=model)
+        picked = resolution_detail.get("selected_documents") or []
+        doc_name = picked[0]["doc_name"] if picked else None
+    else:
+        doc_name = catalog.resolve_for_question(catalog_docs, question)
     # Built from the catalog, so the prompt stays generic and the corpus
     # supplies the specifics.
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)
@@ -157,6 +177,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     return {
         "question": question,
         "forced_phrases": forced_phrases,
+        "resolution_detail": resolution_detail,
         "source_context": context,
         "computation_skipped": kind == "attribution",
         "options": options,

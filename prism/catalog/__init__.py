@@ -5,7 +5,11 @@ semantic search happens.
 
     extraction  cover page (PDF or already-ingested chunks) -> catalog document
     repository  persistence in {bucket}.{scope}.catalog
-    resolver    question -> which doc_name it is about
+    resolver    question -> which doc_name it is about (deterministic, regex)
+    fts_resolver  question -> which doc_name it is about (FTS shortlist + LLM
+                  pick - scales past what resolver.py can, since it never
+                  loads the full catalog into Python; PipelineOptions.resolution
+                  picks between the two)
 """
 from .extraction import (  # noqa: F401
     CLASSIFY_SYSTEM_PROMPT, COVER_PAGES, FIELDS,
@@ -23,6 +27,9 @@ from .resolver import (  # noqa: F401
     resolve_for_question,
     subject_candidates,
 )  # noqa: F401
+from .fts_resolver import (  # noqa: F401
+    llm_resolve, resolve_for_question_at_scale, search_candidates,
+)
 
 
 def rebuild_from_chunks(model: str = None, sectors: dict = None,

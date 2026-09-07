@@ -1,0 +1,46 @@
+doc_name: 3M_2023_DEF14A
+
+question: >
+  Under the 2022 Annual Incentive Plan (AIP), what performance metrics and weightings were used to evaluate the business performance factor for 3M's Chief Executive Officer, #Michael F. Roman#?
+
+concept: annual incentive plan weighting
+
+formula: null
+
+expected_answer: "Local Currency Sales vs. Plan (50%), Operating Income vs. Plan (30%), and 3M Operating Cash Flow Conversion vs. Plan (20%)"
+
+keywords:
+  - "Local Currency Sales"
+  - "Operating Income"
+  - "Operating Cash Flow Conversion"
+  - "Individual performance multiplier"
+  - "ESG modifier"
+
+tags:
+  - governance
+  - executive-compensation
+  - qualitative-table
+  - single-document
+
+gold_answer:
+  value: "Local Currency Sales (50%), Operating Income (30%), Operating Cash Flow Conversion (20%)"
+  unit: text
+  tolerance: exact
+
+evidence:
+  - page: 72
+    title: "Executive Compensation - Overview of Compensation Program Design"
+    type: table
+    table_name: "Annual Incentive"
+    text: >
+      2022 AIP Metrics and Weightings for CEO (3M Worldwide):
+      Local Currency Sales vs. Plan (50%)
+      Operating Income vs. Plan (30%)
+      3M Operating Cash Flow Conversion vs. Plan (20%)
+      Adjusted by Individual Performance Multiplier (+/- 20%) and ESG Modifier (+/- 10% of target).
+
+lineage:
+  method: manual-curated
+  authored_by: "gemini+user"
+  verified: true
+  added_at: "2026-09-07"
