@@ -1,7 +1,12 @@
 """find_pdfs is pure filesystem logic - tested directly. upload_pdfs' own
 logic (key construction, progress reporting, partial failure) is tested
 against a fake S3 client, never a real boto3.Session - this suite stays
-cluster/network-free like the rest of it (see conftest.py)."""
+cluster/network-free like the rest of it (see conftest.py).
+
+AWS_BUCKET/AWS_FOLDER/AWS_REGION come from the environment, same as
+config.source_filename() - the whole point of this shape is ONE place those
+names live, not a separately-typed upload form that can drift from what
+retrieval expects."""
 import pathlib
 
 import pytest
@@ -53,54 +58,78 @@ class _FakeSession:
         return self.fake_client
 
 
-def test_upload_pdfs_builds_company_prefixed_keys(tmp_path, monkeypatch):
+def test_upload_pdfs_uploads_flat_no_company_subfolder(tmp_path, monkeypatch):
+    # A real ingested chunk's xmeta-data.filename confirms the workflow
+    # expects exactly one folder segment from AWS_FOLDER, not a second one
+    # per company - "kpd-couchbase_Prism_3M_3M_2021_Q2_10Q.pdf", not
+    # ".../Prism_3M/3M/...".
+    monkeypatch.setenv("AWS_BUCKET", "my-bucket")
+    monkeypatch.setenv("AWS_FOLDER", "filings")
     _make_pdfs(tmp_path, {"3M": ["3M_2022_10K.pdf", "3M_2022_Q3_10Q.pdf"]})
     fake = _FakeS3()
     monkeypatch.setattr(s3_upload.boto3, "Session",
                         lambda **kw: _FakeSession(fake, **kw))
 
-    result = s3_upload.upload_pdfs(tmp_path, bucket="my-bucket", prefix="filings",
-                                   access_key="AKIA...", secret_key="secret",
-                                   region="us-west-2")
+    result = s3_upload.upload_pdfs(tmp_path, access_key="AKIA...", secret_key="secret")
 
     assert len(result["uploaded"]) == 2
     assert not result["failed"]
     keys = {c[2] for c in fake.calls}
-    assert keys == {"filings/3M/3M_2022_10K.pdf", "filings/3M/3M_2022_Q3_10Q.pdf"}
+    assert keys == {"filings/3M_2022_10K.pdf", "filings/3M_2022_Q3_10Q.pdf"}
+    assert all(c[1] == "my-bucket" for c in fake.calls)
 
 
-def test_upload_pdfs_strips_leading_and_trailing_slashes_from_prefix(tmp_path, monkeypatch):
+def test_upload_pdfs_strips_leading_and_trailing_slashes_from_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "/filings/")
     _make_pdfs(tmp_path, {"3M": ["3M_2022_10K.pdf"]})
     fake = _FakeS3()
     monkeypatch.setattr(s3_upload.boto3, "Session",
                         lambda **kw: _FakeSession(fake, **kw))
 
-    s3_upload.upload_pdfs(tmp_path, bucket="b", prefix="/filings/",
-                         access_key="k", secret_key="s", region="us-west-2")
+    s3_upload.upload_pdfs(tmp_path, access_key="k", secret_key="s")
 
-    assert fake.calls[0][2] == "filings/3M/3M_2022_10K.pdf"
+    assert fake.calls[0][2] == "filings/3M_2022_10K.pdf"
 
 
-def test_upload_pdfs_empty_prefix_omits_leading_slash(tmp_path, monkeypatch):
+def test_upload_pdfs_folder_with_a_slash_stays_a_real_s3_prefix(tmp_path, monkeypatch):
+    # Unlike config.source_filename() (which flattens "/" to "_" to match
+    # xmeta-data.filename), the actual S3 KEY should keep the slash - S3
+    # itself treats it as a real prefix delimiter.
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "Prism/3M")
     _make_pdfs(tmp_path, {"3M": ["3M_2022_10K.pdf"]})
     fake = _FakeS3()
     monkeypatch.setattr(s3_upload.boto3, "Session",
                         lambda **kw: _FakeSession(fake, **kw))
 
-    s3_upload.upload_pdfs(tmp_path, bucket="b", prefix="",
-                         access_key="k", secret_key="s", region="us-west-2")
+    s3_upload.upload_pdfs(tmp_path, access_key="k", secret_key="s")
 
-    assert fake.calls[0][2] == "3M/3M_2022_10K.pdf"
+    assert fake.calls[0][2] == "Prism/3M/3M_2022_10K.pdf"
+
+
+def test_upload_pdfs_empty_folder_omits_leading_slash(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "")
+    _make_pdfs(tmp_path, {"3M": ["3M_2022_10K.pdf"]})
+    fake = _FakeS3()
+    monkeypatch.setattr(s3_upload.boto3, "Session",
+                        lambda **kw: _FakeSession(fake, **kw))
+
+    s3_upload.upload_pdfs(tmp_path, access_key="k", secret_key="s")
+
+    assert fake.calls[0][2] == "3M_2022_10K.pdf"
 
 
 def test_upload_pdfs_records_partial_failure_without_stopping(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "p")
     _make_pdfs(tmp_path, {"3M": ["ok.pdf", "bad.pdf"]})
     fake = _FakeS3(fail_on={"bad.pdf"})
     monkeypatch.setattr(s3_upload.boto3, "Session",
                         lambda **kw: _FakeSession(fake, **kw))
 
-    result = s3_upload.upload_pdfs(tmp_path, bucket="b", prefix="p",
-                                   access_key="k", secret_key="s", region="us-west-2")
+    result = s3_upload.upload_pdfs(tmp_path, access_key="k", secret_key="s")
 
     assert [u["filename"] for u in result["uploaded"]] == ["ok.pdf"]
     assert len(result["failed"]) == 1
@@ -109,14 +138,15 @@ def test_upload_pdfs_records_partial_failure_without_stopping(tmp_path, monkeypa
 
 
 def test_upload_pdfs_reports_progress_per_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "p")
     _make_pdfs(tmp_path, {"3M": ["a.pdf", "b.pdf"]})
     fake = _FakeS3()
     monkeypatch.setattr(s3_upload.boto3, "Session",
                         lambda **kw: _FakeSession(fake, **kw))
     seen = []
 
-    s3_upload.upload_pdfs(tmp_path, bucket="b", prefix="p",
-                         access_key="k", secret_key="s", region="us-west-2",
+    s3_upload.upload_pdfs(tmp_path, access_key="k", secret_key="s",
                          on_progress=lambda i, total, company, filename, ok, error=None:
                              seen.append((i, total, filename, ok)))
 
@@ -127,6 +157,9 @@ def test_upload_pdfs_passes_credentials_to_session_not_environment(tmp_path, mon
     """Credentials must flow through as explicit call arguments, never fall
     back to boto3's default environment/~/.aws credential chain - that's the
     whole point of collecting them in the UI instead of a config file."""
+    monkeypatch.setenv("AWS_BUCKET", "b")
+    monkeypatch.setenv("AWS_FOLDER", "p")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
     _make_pdfs(tmp_path, {"3M": ["a.pdf"]})
     fake = _FakeS3()
     captured = {}
@@ -137,9 +170,8 @@ def test_upload_pdfs_passes_credentials_to_session_not_environment(tmp_path, mon
 
     monkeypatch.setattr(s3_upload.boto3, "Session", fake_session_ctor)
 
-    s3_upload.upload_pdfs(tmp_path, bucket="b", prefix="p",
-                         access_key="AKIA_TEST", secret_key="secret_test",
-                         region="us-west-2", session_token="token_test")
+    s3_upload.upload_pdfs(tmp_path, access_key="AKIA_TEST", secret_key="secret_test",
+                         session_token="token_test")
 
     assert captured["aws_access_key_id"] == "AKIA_TEST"
     assert captured["aws_secret_access_key"] == "secret_test"
