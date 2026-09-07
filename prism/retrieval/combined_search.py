@@ -35,7 +35,8 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
              probe: bool = False, repair: bool = False,
              use_concept: bool = True, fusion: str = None, weights: dict = None,
              rank_constant: int = None, window_size: int = None,
-             knn_k: int = None) -> list:
+             knn_k: int = None, forced_phrases: list = None,
+             source_filename: str = None) -> list:
     """Every configuration issues exactly ONE statement.
 
     `probe` and `repair` are diagnostics and both default OFF, because each
@@ -55,9 +56,11 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
     embedding = embed(question)
     anchors = plan_anchors(plan) if use_anchors else []
     if anchors and (probe or repair):
-        live, dead, _counts = filter_anchors(anchors, doc_name)
+        live, dead, _counts = filter_anchors(anchors, doc_name,
+                                             source_filename=source_filename)
         if dead and repair:
-            seen = vector_search(embedding, doc_name, top_k)
+            seen = vector_search(embedding, doc_name, top_k,
+                                 source_filename=source_filename)
             fixed, _proposed = repair_anchors(question, dead, seen, doc_name)
             live = live + [a for a in fixed if a not in live]
         # Not `live or anchors`: when every anchor is dead the lexical leg is
@@ -70,6 +73,11 @@ def retrieve(question: str, plan: dict, doc_name: str = None, *,
                              concept=plan.get("concept") if use_concept else None,
                              fusion=fusion, weights=weights,
                              rank_constant=rank_constant, window_size=window_size,
-                             knn_k=knn_k or config.KNN_CANDIDATES)
-    anchor_chunks = anchor_search(anchors, doc_name) if (anchors and doc_name) else []
-    return combine(anchor_chunks, vector_search(embedding, doc_name, top_k), top_k=top_k)
+                             knn_k=knn_k or config.KNN_CANDIDATES,
+                             forced_phrases=forced_phrases,
+                             source_filename=source_filename)
+    anchor_chunks = (anchor_search(anchors, doc_name, source_filename=source_filename)
+                    if (anchors and doc_name) else [])
+    return combine(anchor_chunks,
+                  vector_search(embedding, doc_name, top_k, source_filename=source_filename),
+                  top_k=top_k)

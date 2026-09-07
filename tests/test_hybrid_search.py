@@ -26,7 +26,8 @@ def search_objects(statement: str) -> list:
         end = statement.index(', {"index"', start)
         blob = statement[start:end]
         for token in ("$query_vector", "$filename", "$match_text",
-                      "$terms", "$concept", "$a0", "$a1", "$a2"):
+                      "$terms", "$concept", "$a0", "$a1", "$a2",
+                      "$phrase_0", "$phrase_1"):
             blob = blob.replace(token, f'"{token}"')
         objects.append(json.loads(blob))
         cursor = end
@@ -91,6 +92,21 @@ def test_scope_is_applied_inside_search_on_both_legs():
     assert "filename = $filename" not in statement
 
 
+def test_a_resolved_source_filename_is_used_verbatim_not_recomputed():
+    # config.source_filename() depends on AWS_BUCKET/AWS_FOLDER staying
+    # correct forever; a source_filename already resolved (from the catalog
+    # entry) must win outright, not just influence, whatever those env vars
+    # say at query time.
+    _, params = build_statement("q", VEC, "3M_2023Q2_10Q", ANCHORS,
+                                source_filename="kpd-couchbase_Prism_3M_3M_2023Q2_10Q.pdf")
+    assert params["$filename"] == "kpd-couchbase_Prism_3M_3M_2023Q2_10Q.pdf"
+
+
+def test_no_source_filename_falls_back_to_computing_it():
+    _, params = build_statement("q", VEC, "3M_2023Q2_10Q", ANCHORS)
+    assert params["$filename"].endswith("3M_2023Q2_10Q.pdf")
+
+
 def test_unscoped_search_omits_the_filter_entirely():
     statement, params = build_statement("q", VEC, doc_name=None, anchors=ANCHORS)
     lexical, vector = search_objects(statement)
@@ -112,6 +128,39 @@ def test_title_boost_is_off_by_default():
     boosted_fields = [d.get("field") for d in
                       search_object(boosted)["query"]["conjuncts"][1]["disjuncts"]]
     assert "meta-data.associated-titles" in boosted_fields
+
+
+def test_forced_phrases_add_match_phrase_disjuncts_alongside_the_term_bag():
+    # Path A: a forced phrase (from planner.extract_phrase_terms's #...#
+    # spans) is ADDED to the existing lexical leg, not a replacement for the
+    # term bag - both should be present, each phrase as its own match_phrase
+    # disjunct scored and summed by Bleve like any other.
+    statement, params = build_statement("q", VEC, "3M_2023Q2_10Q", ANCHORS,
+                                        forced_phrases=["John Doe"])
+    disjuncts = search_object(statement)["query"]["conjuncts"][1]["disjuncts"]
+    assert disjuncts[0]["match"] == "$terms"                    # term bag still first
+    phrase_disjuncts = [d for d in disjuncts if "match_phrase" in d]
+    assert len(phrase_disjuncts) == 1
+    assert phrase_disjuncts[0]["match_phrase"] == "$phrase_0"
+    assert phrase_disjuncts[0]["field"] == "text-to-embed"
+    assert params["$phrase_0"] == "John Doe"
+
+
+def test_forced_phrases_each_get_their_own_disjunct_and_parameter():
+    statement, params = build_statement("q", VEC, "3M_2023Q2_10Q", ANCHORS,
+                                        forced_phrases=["John Doe", "Jane Roe"])
+    disjuncts = search_object(statement)["query"]["conjuncts"][1]["disjuncts"]
+    phrase_disjuncts = [d for d in disjuncts if "match_phrase" in d]
+    assert {d["match_phrase"] for d in phrase_disjuncts} == {"$phrase_0", "$phrase_1"}
+    assert params["$phrase_0"] == "John Doe"
+    assert params["$phrase_1"] == "Jane Roe"
+
+
+def test_no_forced_phrases_adds_no_disjunct_or_parameter():
+    statement, params = build_statement("q", VEC, "3M_2023Q2_10Q", ANCHORS)
+    disjuncts = search_object(statement)["query"]["conjuncts"][1]["disjuncts"]
+    assert not any("match_phrase" in d for d in disjuncts)
+    assert not any(k.startswith("$phrase_") for k in params)
 
 
 def test_index_name_is_fully_qualified():

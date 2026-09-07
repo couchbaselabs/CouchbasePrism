@@ -20,7 +20,8 @@ from .. import config, trace
 from ..couchbase_io import query
 
 
-def probe_anchors(anchors: list, doc_name: str = None) -> dict:
+def probe_anchors(anchors: list, doc_name: str = None,
+                  source_filename: str = None) -> dict:
     """Returns {anchor: matching chunk count}. Case-insensitive substring, which
     is deliberately looser than the `match_phrase` BM25 will run: the point is
     to identify anchors that cannot match under ANY analysis, so a false
@@ -38,7 +39,7 @@ def probe_anchors(anchors: list, doc_name: str = None) -> dict:
 
     where = "d.`text-to-embed` IS NOT MISSING"
     if doc_name:
-        params["$filename"] = config.source_filename(doc_name)
+        params["$filename"] = source_filename or config.source_filename(doc_name)
         where += " AND d.`xmeta-data`.`filename` = $filename"
 
     statement = (f"SELECT {', '.join(projections)}\n"
@@ -49,7 +50,8 @@ def probe_anchors(anchors: list, doc_name: str = None) -> dict:
     return {anchor: int(counts.get(f"a{i}") or 0) for i, anchor in enumerate(anchors)}
 
 
-def filter_anchors(anchors: list, doc_name: str = None) -> tuple:
+def filter_anchors(anchors: list, doc_name: str = None,
+                   source_filename: str = None) -> tuple:
     """Returns (live, dead, counts).
 
     Every anchor dead means the planner's whole vocabulary guess missed. In that
@@ -57,7 +59,7 @@ def filter_anchors(anchors: list, doc_name: str = None) -> tuple:
     text, which is weak but is not nothing - dropping the lexical leg entirely
     would be strictly worse.
     """
-    counts = probe_anchors(anchors, doc_name)
+    counts = probe_anchors(anchors, doc_name, source_filename=source_filename)
     live = [a for a in anchors or [] if counts.get(a, 0) > 0]
     dead = [a for a in anchors or [] if a and counts.get(a, 0) == 0]
     if counts:

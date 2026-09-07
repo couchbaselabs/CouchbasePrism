@@ -201,13 +201,25 @@ def fiscal_year(iso_date: str):
 
 
 def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
-                   extractor: str = "pymupdf-sort+closed-set-classification") -> dict:
+                   extractor: str = "pymupdf-sort+closed-set-classification",
+                   source_filename: str = None) -> dict:
     """Only the fields something actually reads.
 
     Each extracted field keeps its {value, confidence, source_span} envelope
     because those drive the grounding check. `gics_sector` has no envelope: it is
     not extracted from the document at all, so a confidence score would be
     fiction. Its provenance is recorded in `lineage` instead.
+
+    `source_filename` is the actual `xmeta-data.filename` these chunks are
+    stored under - resolved ONCE here, at build time, via
+    config.source_filename(doc_name) (AWS_BUCKET/AWS_FOLDER-derived). Every
+    retrieval-time call site used to recompute that mapping fresh on every
+    query instead of reading it from here - which meant AWS_BUCKET/AWS_FOLDER
+    had to stay correct FOREVER, not just once, for retrieval to keep working.
+    Verified live: an AWS_FOLDER drift after this field was already correct in
+    the catalog broke nothing, because retrieval now reads this instead of
+    recomputing. Absent (None) for a document built via build_from_pdf, which
+    has no S3-derived storage location to record.
     """
     period = extraction.get("period_end_date", {})
     raw = period.get("value")
@@ -229,6 +241,8 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
     if gics_sector:
         document["gics_sector"] = gics_sector
         document["lineage"]["gics_sector"] = "corpus_metadata"
+    if source_filename:
+        document["source_filename"] = source_filename
     return document
 
 
@@ -245,4 +259,5 @@ def build_from_chunks(doc_name: str, model: str = None, gics_sector: str = None,
     return build_document(
         doc_name, classify_cover(cover_text_from_chunks(doc_name, pages), model=model),
         gics_sector=gics_sector,
-        extractor="chunks-sort+closed-set-classification")
+        extractor="chunks-sort+closed-set-classification",
+        source_filename=config.source_filename(doc_name))

@@ -48,14 +48,15 @@ def embed(text: str) -> list:
 
 
 def build_statement(embedding: list, doc_name: str = None,
-                    top_k: int = config.TOP_K, knn_k: int = None) -> tuple:
+                    top_k: int = config.TOP_K, knn_k: int = None,
+                    source_filename: str = None) -> tuple:
     """kNN-only SEARCH(). No `query` clause at all: adding one would union its
     hits with the kNN hits and sum the scores, which is how the fused hybrid
     query ended up letting a filename match perturb vector rank."""
     params = {"$query_vector": embedding}
     knn_filter = ""
     if doc_name:
-        params["$filename"] = config.source_filename(doc_name)
+        params["$filename"] = source_filename or config.source_filename(doc_name)
         knn_filter = (', "filter": {"field": "xmeta-data.filename", '
                       '"match": $filename}')
     statement = f"""
@@ -77,9 +78,11 @@ def build_statement(embedding: list, doc_name: str = None,
 
 
 def vector_search(embedding: list, doc_name: str = None,
-                  top_k: int = config.TOP_K, knn_k: int = None) -> list:
+                  top_k: int = config.TOP_K, knn_k: int = None,
+                  source_filename: str = None) -> list:
     """doc_name=None searches the whole corpus - that is phase 1's unscoped
     baseline, and the reason it retrieved chunks from five different filings
     for a question about one."""
-    statement, params = build_statement(embedding, doc_name, top_k, knn_k)
+    statement, params = build_statement(embedding, doc_name, top_k, knn_k,
+                                       source_filename=source_filename)
     return query(statement, params)

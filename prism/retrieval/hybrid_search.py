@@ -84,7 +84,8 @@ def _merged_terms(concept: str, anchors: list) -> str:
 
 
 def _lexical_clause(question: str, anchors: list, concept: str,
-                    title_boost: float, params: dict) -> str:
+                    title_boost: float, params: dict,
+                    forced_phrases: list = None) -> str:
     """The disjuncts BM25 scores against. Falls back to the question text only
     when there is nothing better, so the leg never drops out entirely."""
     disjuncts = []
@@ -114,13 +115,31 @@ def _lexical_clause(question: str, anchors: list, concept: str,
                          '"field": "meta-data.associated-titles", '
                          f'"boost": {title_boost}}}')
         params.setdefault("$match_text", question)
+    # Forced phrases (planner.extract_phrase_terms's #...# spans) are a
+    # DIFFERENT case from the match_phrase-per-anchor result above: those were
+    # the planner's own guesses at generic captions ("Total assets") that
+    # recur legitimately across a filing. A forced phrase is the person
+    # asking the question naming something specific and rare (a named
+    # individual, an exact term) - added unconditionally, on top of whatever
+    # else is already in this leg, not as a replacement for it. Path A: one
+    # more disjunct in the existing lexical leg, scored and summed by Bleve
+    # like any other - not a separately fused channel. See config.py/
+    # hybrid_search.py's fusion discussion for why a third fused channel
+    # would need native RRF/RSF's 2-leg (query+knn) design abandoned in favor
+    # of the in-code rrf_merge generalized to N legs - a bigger, separate step
+    # this does not take.
+    for i, phrase in enumerate(forced_phrases or []):
+        key = f"$phrase_{i}"
+        disjuncts.append(f'{{"match_phrase": {key}, "field": "text-to-embed"}}')
+        params[key] = phrase
     return f'{{"disjuncts": [{", ".join(disjuncts)}]}}'
 
 
 def build_statement(question: str, embedding: list, doc_name: str = None,
                     anchors: list = None, top_k: int = config.TOP_K,
                     knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
-                    concept: str = None) -> tuple:
+                    concept: str = None, forced_phrases: list = None,
+                    source_filename: str = None) -> tuple:
     """Returns (statement, params) for the two-leg union.
 
     Split from execution so the query shape can be tested without a cluster -
@@ -129,10 +148,11 @@ def build_statement(question: str, embedding: list, doc_name: str = None,
     branch cannot carry them directly.
     """
     params = {"$query_vector": embedding}
-    lexical = _lexical_clause(question, anchors, concept, title_boost, params)
+    lexical = _lexical_clause(question, anchors, concept, title_boost, params,
+                              forced_phrases)
 
     if doc_name:
-        params["$filename"] = config.source_filename(doc_name)
+        params["$filename"] = source_filename or config.source_filename(doc_name)
         scope = '{"field": "xmeta-data.filename", "match": $filename}'
         lexical_query = f'{{"conjuncts": [{scope}, {lexical}]}}'
         knn_filter = f', "filter": {scope}'
@@ -167,17 +187,19 @@ def build_fused_statement(question: str, embedding: list, doc_name: str = None,
                           anchors: list = None, top_k: int = config.TOP_K,
                           knn_k: int = config.KNN_CANDIDATES,
                           title_boost: float = 0.0, concept: str = None,
-                          weights: dict = None) -> tuple:
+                          weights: dict = None, forced_phrases: list = None,
+                          source_filename: str = None) -> tuple:
     """The ORIGINAL single fused SEARCH(): lexical and kNN in one query object,
     scores summed by the Search service. Retained as a fallback - see the module
     docstring for why it is not the default. Reachable via
     config.HYBRID_FUSION = "score"."""
     weights = weights or {}
     params = {"$query_vector": embedding}
-    lexical = _lexical_clause(question, anchors, concept, title_boost, params)
+    lexical = _lexical_clause(question, anchors, concept, title_boost, params,
+                              forced_phrases)
     knn_filter = ""
     if doc_name:
-        params["$filename"] = config.source_filename(doc_name)
+        params["$filename"] = source_filename or config.source_filename(doc_name)
         scope = '{"field": "xmeta-data.filename", "match": $filename}'
         query_clause = (f'{{"conjuncts": [{scope}, {lexical}], '
                         f'"boost": {weights.get("bm25", 1.0)}}}')
@@ -254,7 +276,8 @@ def build_native_statement(question: str, embedding: list, doc_name: str = None,
                           knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
                           concept: str = None, strategy: str = "rrf",
                           weights: dict = None, rank_constant: int = None,
-                          window_size: int = None) -> tuple:
+                          window_size: int = None, forced_phrases: list = None,
+                          source_filename: str = None) -> tuple:
     """One SEARCH() with the Search service doing the fusion.
 
     Weights are expressed as each query's TOP-LEVEL boost, which is how the
@@ -268,11 +291,12 @@ def build_native_statement(question: str, embedding: list, doc_name: str = None,
     bm25_weight = weights.get("bm25", 1.0)
     vector_weight = weights.get("vector", 1.0)
     params = {"$query_vector": embedding}
-    lexical = _lexical_clause(question, anchors, concept, title_boost, params)
+    lexical = _lexical_clause(question, anchors, concept, title_boost, params,
+                              forced_phrases)
 
     knn_filter = ""
     if doc_name:
-        params["$filename"] = config.source_filename(doc_name)
+        params["$filename"] = source_filename or config.source_filename(doc_name)
         scope = '{"field": "xmeta-data.filename", "match": $filename}'
         query_clause = f'{{"conjuncts": [{scope}, {lexical}]'
         knn_filter = f', "filter": {scope}'
@@ -359,7 +383,8 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
                   knn_k: int = config.KNN_CANDIDATES, title_boost: float = 0.0,
                   concept: str = None, fusion: str = None,
                   weights: dict = None, rank_constant: int = None,
-                  window_size: int = None) -> list:
+                  window_size: int = None, forced_phrases: list = None,
+                  source_filename: str = None) -> list:
     """One statement either way. Native fusion returns a single blended
     SEARCH_SCORE(); RRF returns the per-channel derivation as well."""
     mode = fusion or config.HYBRID_FUSION
@@ -367,7 +392,8 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
         statement, params = build_native_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost,
             concept, strategy=config.NATIVE_STRATEGIES[mode], weights=weights,
-            rank_constant=rank_constant, window_size=window_size)
+            rank_constant=rank_constant, window_size=window_size,
+            forced_phrases=forced_phrases, source_filename=source_filename)
         rows = query(statement, params)
         for row in rows:
             channels = parse_explanation((row.pop("meta", None) or {}).get("explanation"))
@@ -378,10 +404,12 @@ def hybrid_search(question: str, embedding: list, doc_name: str = None,
     if mode == "score":
         statement, params = build_fused_statement(
             question, embedding, doc_name, anchors, top_k, knn_k, title_boost,
-            concept, weights=weights)
+            concept, weights=weights, forced_phrases=forced_phrases,
+            source_filename=source_filename)
         return query(statement, params)
 
     statement, params = build_statement(
-        question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept)
+        question, embedding, doc_name, anchors, top_k, knn_k, title_boost, concept,
+        forced_phrases=forced_phrases, source_filename=source_filename)
     return rrf_merge(query(statement, params), top_k=top_k, weights=weights,
                      k=rank_constant if rank_constant is not None else RRF_K)

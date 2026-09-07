@@ -14,7 +14,8 @@ from ..couchbase_io import query
 
 
 def anchor_search(anchors: list, doc_name: str,
-                  limit: int = config.MAX_ANCHOR_CHUNKS) -> list:
+                  limit: int = config.MAX_ANCHOR_CHUNKS,
+                  source_filename: str = None) -> list:
     """Ranked by anchor RARITY, not raw hit count.
 
     The planner reliably emits a plausible-but-invented label alongside the
@@ -43,7 +44,8 @@ def anchor_search(anchors: list, doc_name: str,
               SATISFIES CONTAINS(LOWER(d.`text-to-embed`), LOWER(a)) END
         LIMIT 100
         """,
-        {"$anchors": anchors, "$filename": config.source_filename(doc_name)},
+        {"$anchors": anchors,
+         "$filename": source_filename or config.source_filename(doc_name)},
     )
     if not rows:
         return []

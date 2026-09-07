@@ -75,6 +75,13 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     dictionary_data = (dictionary_data if dictionary_data is not None
                        else dictionary.load())
 
+    # #...# spans are stripped here, once, before anything else sees the raw
+    # question - the planner and the embedding model both get ordinary text,
+    # unaware anything was marked (the words themselves stay in place, only
+    # the hashes go). forced_phrases only reaches hybrid_search's lexical
+    # leg, further down; it is a no-op for every other retrieval path.
+    question, forced_phrases = retrieval.extract_phrase_terms(question)
+
     doc_name = (catalog.resolve_for_question(catalog_docs, question)
                 if options.catalog_filter else None)
     # Built from the catalog, so the prompt stays generic and the corpus
@@ -91,7 +98,9 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                                 rank_constant=options.rank_constant,
                                 window_size=options.window_size,
                                 knn_k=options.knn_k,
-                                top_k=options.top_k or config.TOP_K)
+                                top_k=options.top_k or config.TOP_K,
+                                forced_phrases=forced_phrases,
+                                source_filename=(entry or {}).get("source_filename"))
 
     kind = plan.get("answer_kind")
     entry = policy = None
@@ -147,6 +156,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
 
     return {
         "question": question,
+        "forced_phrases": forced_phrases,
         "source_context": context,
         "computation_skipped": kind == "attribution",
         "options": options,
