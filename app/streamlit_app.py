@@ -906,37 +906,48 @@ def render_detail(run: dict):
         with cols[0]:
             st.caption("Custom question — no reference" if q["id"] == "custom"
                       else "Gold answer")
-            st.write(q["expected_answer"])
-            gold = q.get("gold_answer")
-            if gold and gold.get("value") is not None:
-                tolerance = f" ± {gold['tolerance']}" if gold.get("tolerance") else ""
-                st.caption(f"{gold['value']} {gold.get('unit', '')}{tolerance}".strip())
+            if q["id"] == "custom":
+                st.write(q["expected_answer"])
+            else:
+                # concept/formula/evidence are ftsprism-native fields (see
+                # eval/corpora/ftsprism.py's questions()) - absent for any
+                # corpus that doesn't carry them, so each line only appears
+                # when there's something real to show. Shown inline, not
+                # tucked in an expander - there's room for it, and it's the
+                # whole point of a gold answer: it should be checkable at a
+                # glance, not one more click away. Deliberately NOT showing
+                # keywords/tags here - those are retrieval-demo plumbing, not
+                # part of what the gold answer actually asserts.
+                gold_lines = []
+                if q.get("concept"):
+                    gold_lines.append(f"concept: {q['concept']}")
+                if q.get("formula"):
+                    gold_lines.append(f"formula: {q['formula']}")
+                gold_lines.append(f'expected_answer: "{q["expected_answer"]}"')
+                evidence = q.get("evidence") or []
+                if evidence:
+                    gold_lines.append("")
+                    gold_lines.append("Evidence:")
+                    for ev in evidence:
+                        parts = [p for p in (
+                            f"Page {ev['page']}" if ev.get("page") is not None else None,
+                            ev.get("title"), ev.get("type")) if p]
+                        gold_lines.append(f"{q.get('doc_name', '')}: " + " · ".join(parts))
+                        if ev.get("text"):
+                            gold_lines.append("")
+                            gold_lines.append(ev["text"].strip())
+                st.code("\n".join(gold_lines), language=None, wrap_lines=True)
         with cols[1]:
             st.caption("PRISM answer")
+            # calc["computed"]'s formula is shown directly, not left to the
+            # model's own prose - deterministic and immune to whatever
+            # formatting inconsistency the model's text might have, same
+            # reasoning as the plain-prose rule in answer.py.
+            for c in result["calculation"].get("computed") or []:
+                st.code(f"{c['label']}: {c['formula']} = {c['value']:.4g}",
+                       language=None, wrap_lines=True)
             st.write(result["answer"])
         st.caption(verdict.get("comment", ""))
-
-        # Concept/formula/evidence are ftsprism-native fields (see
-        # eval/corpora/ftsprism.py's questions()) - absent for a custom
-        # question or any corpus that doesn't carry them, so this only shows
-        # up when there's something real to show, not an empty shell.
-        if q.get("concept") or q.get("formula") or q.get("evidence"):
-            with st.expander("Gold answer detail", icon=":material/verified:"):
-                if q.get("concept"):
-                    st.caption(f"Concept: {q['concept']}")
-                if q.get("formula"):
-                    st.code(q["formula"], language=None)
-                for tag in q.get("tags") or []:
-                    st.badge(tag, color="gray")
-                for evidence in q.get("evidence") or []:
-                    label = f"p{evidence.get('page', '?')}"
-                    if evidence.get("title"):
-                        label += f" · {evidence['title']}"
-                    if evidence.get("type"):
-                        label += f" · {evidence['type']}"
-                    st.markdown(f"**{label}**")
-                    if evidence.get("text"):
-                        st.caption(evidence["text"])
 
     metrics = st.columns(4, border=True)
     metrics[0].metric("Elapsed", f"{stats['elapsed_ms'] / 1000:.2f}s",

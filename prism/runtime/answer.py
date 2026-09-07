@@ -9,13 +9,22 @@ compute a quick ratio while holding the computed 0.9578.
 from .. import llm
 from .fact_binding import format_chunks
 
+PLAIN_PROSE_RULE = (
+    "Write in plain prose - no markdown bold, italics, or other emphasis markup. "
+    "Models tend to wrap numbers in **bold** with no surrounding space, which some "
+    "renderers show as words running together with no space (e.g. \"3,404**million**\" "
+    "- verified live, this is a real rendering and copy-paste corruption, not a "
+    "cosmetic nitpick) - plain text has no such failure mode."
+)
+
 BASE_ANSWER_PROMPT = (
     "Answer the question using ONLY the provided excerpts. If the answer is not in "
     "them, say so clearly. Cite sources by their [number].\n\n"
     "Sources marked [TABLE] contain structured data and are usually the authoritative "
     "source for a specific quantitative answer. When a question asks for a value, a "
     "rate, or what drove a change, check [TABLE] sources first and prefer their figures "
-    "over a narrative source's paraphrase."
+    "over a narrative source's paraphrase.\n\n"
+    f"{PLAIN_PROSE_RULE}"
 )
 
 COMPUTED_ANSWER_PROMPT = (
@@ -30,18 +39,28 @@ COMPUTED_ANSWER_PROMPT = (
     "question invites you to say a metric is 'not relevant' or cannot be determined, do "
     "not take that option when a value has been computed - report the value.\n\n"
     "If the computed block states a VERDICT, state that conclusion directly. If it says "
-    "the verdict was DECLINED for lack of an approved interpretation policy, report the "
-    "value and say plainly that characterising IT (healthy/unhealthy, high/low, stable/"
-    "unstable) against a threshold requires an approved policy that does not exist yet - "
-    "and do not supply your own threshold for the computed value. This restriction is "
-    "about the computed value only, not about the excerpts: if an excerpt directly and "
-    "explicitly states its own qualitative characterization or historical pattern (for "
-    "example, a filing stating it has raised a dividend for a stated number of consecutive "
-    "years), report that as a grounded, cited fact and let it answer the question's "
-    "qualitative framing - that is the source's own characterization, not one you "
-    "invented. If it says the verdict is BLOCKED, report the candidates and say the "
-    "conventions disagree.\n\n"
-    "Cite excerpts by [number] where they support the narrative."
+    "the verdict was DECLINED for lack of an approved interpretation policy: this matters "
+    "ONLY when the question itself asks for a characterization (it uses words like "
+    "healthy, stable, high, low, good, adequate, or similar, or otherwise asks you to "
+    "judge the value). In that case, report the value and say plainly that characterising "
+    "it against a threshold requires an approved policy that does not exist yet - and do "
+    "not supply your own threshold. That restriction is about the computed value only, not "
+    "about the excerpts: if an excerpt directly and explicitly states its own qualitative "
+    "characterization or historical pattern (for example, a filing stating it has raised a "
+    "dividend for a stated number of consecutive years), report that as a grounded, cited "
+    "fact and let it answer the question's qualitative framing - that is the source's own "
+    "characterization, not one you invented.\n\n"
+    "If the question is PURELY quantitative (it does not ask for a characterization at "
+    "all - e.g. \"what was the ratio\"), a DECLINED verdict is not something to mention: "
+    "just report the value and how it was derived. Do not go looking through the excerpts "
+    "for a qualitative statement to volunteer when nothing qualitative was asked - that is "
+    "answering a question nobody asked.\n\n"
+    "If it says the verdict is BLOCKED, report the candidates and say the conventions "
+    "disagree.\n\n"
+    "Answer in exactly two short paragraphs: the first states the answer itself, pithily, "
+    "with citations; the second explains how it was arrived at - the formula/derivation "
+    "and the specific figures used, cited by [number].\n\n"
+    f"{PLAIN_PROSE_RULE}"
 )
 
 
