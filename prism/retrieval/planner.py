@@ -15,6 +15,7 @@ unreliable in real corpora. Anchors hang off each required fact rather than off
 the plan as a whole, so it is clear which anchor is meant to locate which fact.
 """
 import ast
+import re
 
 from .. import llm
 
@@ -99,6 +100,34 @@ GUIDELINES:
 - Do not propose formulas, perform calculations, or make the final judgment.
 - Return strictly valid JSON without markdown or explanatory text.
 """
+
+
+_HASH_PHRASE = re.compile(r"#([^#]+)#")
+
+
+def extract_phrase_terms(question: str) -> tuple:
+    """Pulls #...#-delimited spans out of a question as forced exact-phrase
+    search terms - "How much did #John Doe# earn..." yields a cleaned
+    question with the hashes stripped ("How much did John Doe earn...") and
+    ["John Doe"] as a phrase to match verbatim, not just contribute words to
+    the usual bag-of-terms leg.
+
+    The hashes are removed but the words themselves stay in place - the
+    embedding model and the LLM planner both see ordinary text, unaware
+    anything was marked. Only hybrid_search's lexical clause sees the
+    extracted phrase separately, as an additional match_phrase disjunct
+    (Path A: folded into the existing lexical leg's score, not a separately
+    fused channel - see the "why RRF" discussion this was measured against
+    for match_phrase-per-anchor, a different and worse-measured case: a
+    generic recurring caption printed on many pages, not a specific name).
+
+    This runs BEFORE plan_evidence(), same as everything else in this
+    module - the planner never sees the raw hash marks either way.
+    """
+    phrases = [m.group(1).strip() for m in _HASH_PHRASE.finditer(question)]
+    phrases = [p for p in phrases if p]
+    cleaned = _HASH_PHRASE.sub(lambda m: m.group(1), question)
+    return cleaned, phrases
 
 
 def plan_evidence(question: str, model=None, source_context: str = None) -> dict:
