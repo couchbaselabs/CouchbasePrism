@@ -24,7 +24,15 @@ DICTIONARY_COLLECTION = "dictionary"
 # (couchbase_io.py's create/delete/count/facet, scoped under /bucket/{b}/
 # scope/{s}/index/{name}) take the bare name instead - the scope already
 # names the bucket and scope, so repeating them in the index name 400s.
-FTS_DOCS_INDEX_NAME = "ftsFinanceBench"
+#
+# Fixed, not environment-configurable, same reasoning as BUCKET/SCOPE above -
+# and deliberately named for PRISM itself, not any one corpus that happens to
+# be loaded through it. It was "ftsFinanceBench" until 2026-09-07, a name left
+# over from before ftsPrism existed; Initialize faithfully rebuilds an index
+# under whatever name design/fts-index.json carries, so the two must always
+# agree, or every SEARCH() in the app (retrieval, the Document Workbench,
+# catalog extraction) resolves against a name nothing created.
+FTS_DOCS_INDEX_NAME = "ftsPrism"
 FTS_DOCS_INDEX = f"{BUCKET}.{SCOPE}.{FTS_DOCS_INDEX_NAME}"
 
 
@@ -37,11 +45,21 @@ def couchbase_auth() -> tuple:
 
 
 # --- Source objects --------------------------------------------------------
+def aws_folder() -> str:
+    """AWS_FOLDER is written in ordinary AWS folder notation (e.g. "Prism/3M",
+    a real S3 prefix with a slash) - the flattening to underscores is the
+    workflow's own doing, not something a human should have to pre-compute
+    and keep in sync by hand. Verified live: an S3 key "Prism/3M/x.pdf"
+    becomes `xmeta-data.filename` "..._Prism_3M_x.pdf" - the slash becomes an
+    underscore same as every other path segment join."""
+    return os.environ["AWS_FOLDER"].replace("/", "_")
+
+
 def source_filename(doc_name: str) -> str:
     """The AI Data Plane workflow derives the stored filename from the S3
     location as {bucket}_{folder}_{name}.pdf, so a catalog doc_name does not
     match `xmeta-data.filename` directly."""
-    return f"{os.environ['AWS_BUCKET']}_{os.environ['AWS_FOLDER']}_{doc_name}.pdf"
+    return f"{os.environ['AWS_BUCKET']}_{aws_folder()}_{doc_name}.pdf"
 
 
 # --- Models ----------------------------------------------------------------

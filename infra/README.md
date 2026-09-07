@@ -2,13 +2,13 @@
 
 Captured from the 8.0.1 cluster before it was replaced, so the 8.1 rebuild
 matches rather than being reconstructed from memory. Keep every name identical:
-`prism/config.py` derives `FTS_DOCS_INDEX` as `{BUCKET}.{SCOPE}.ftsFinanceBench`,
+`prism/config.py` derives `FTS_DOCS_INDEX` as `{BUCKET}.{SCOPE}.ftsPrism`,
 so a rename means a code change.
 
     bucket      acme
     scope       prism
     collections docs, catalog
-    FTS index   ftsFinanceBench          (on acme.prism.docs)
+    FTS index   ftsPrism          (on acme.prism.docs)
 
 ## Order
 
@@ -43,7 +43,7 @@ it this time.
 
 ## FTS index
 
-`fts.acme.prism.ftsFinanceBench.json` is the captured definition. Four field
+`fts.acme.prism.ftsPrism.json` is the captured definition. Four field
 mappings matter, and two of them were bugs we already paid for once:
 
 | field | setting | why |

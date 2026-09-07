@@ -1,6 +1,6 @@
 {
   "type": "fulltext-index",
-  "name": "ftsFinanceBench",
+  "name": "ftsPrism",
   "uuid": "20464bc572b7a537",
   "sourceType": "gocbcore",
   "sourceName": "acme",

@@ -9,6 +9,7 @@ The app deliberately calls ``prism.runtime.answer_question`` and
 """
 import html
 import json
+import os
 import pathlib
 import re
 import sys
@@ -202,7 +203,10 @@ def load_catalog():
 
 @st.cache_data(show_spinner=False)
 def load_questions():
-    return load_corpus("financebench").questions()
+    # ftsprism, not financebench - the demo runs on PRISM's own open corpus
+    # now; FinanceBench stays available for eval.run_benchmark's internal
+    # comparison, but has no place in the public-facing "Ask a question" tab.
+    return load_corpus("ftsprism").questions()
 
 
 def all_sectors() -> dict:
@@ -231,7 +235,7 @@ def company_catalog(catalog_docs: list, company: str) -> list:
 
 
 def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
-                 limit: int = 50) -> list:
+                 limit: int = 50, source_filename: str = None) -> list:
     """Chunks for one document, JSON-ready. The embedding vector is stripped
     in Python rather than excluded in SQL++ - nothing elsewhere in this
     codebase relies on an EXCLUDE clause, and this keeps the query portable
@@ -241,29 +245,51 @@ def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
     not plain N1QL WHERE predicates - the collection has no GSI on filename or
     page-number, so a plain `d.xmeta-data.filename = $filename` predicate
     fell back to a primary index scan. Confirmed against the live index
-    definition (GET /api/bucket/{bucket}/scope/{scope}/index/ftsFinanceBench)
+    definition (GET /api/bucket/{bucket}/scope/{scope}/index/ftsPrism)
     that both fields ARE mapped: xmeta-data.filename as text/keyword analyzer
     (an exact-match `match`, same as the retrieval path already uses),
     meta-data.page-number as a `number` field - FTS has no numeric term query,
     so an exact page is a min/max range collapsed to one point.
+
+    source_filename should be the caller's already-resolved catalog entry
+    field - same reasoning as the runtime pipeline's own source_filename
+    threading (prism/runtime/pipeline.py): recomputing config.source_filename
+    fresh on every call means AWS_BUCKET/AWS_FOLDER have to stay correct
+    forever, not just once. Falls back to recomputing only when the caller
+    has no catalog entry to read it from.
 
     search_terms scopes to the WHOLE document, not one page - `page` is
     ignored entirely when terms are given, not merely de-prioritized, since
     finding where a term appears is the point and a page constraint would
     defeat it. Same text-to-embed field and match/OR shape the retrieval
     path's BM25 leg already uses (the index's own scoring_model is "bm25",
-    confirmed from its live definition), not a raw LIKE.
+    confirmed from its live definition), not a raw LIKE. A #...# span inside
+    search_terms is a forced exact-phrase match, same syntax and same
+    extract_phrase_terms() as the runtime pipeline's Path A (prism/retrieval/
+    planner.py) - added as its own match_phrase disjunct alongside the usual
+    bag-of-words match, not instead of it.
 
     A document-wide term search has no natural bound the way a single page
     does, so this caps at `limit` - callers should tell the user when the
     result is exactly at the cap, since that's the signal more exist.
     """
     conjuncts = ['{"field": "xmeta-data.filename", "match": $filename}']
-    params = {"$filename": config.source_filename(doc_name)}
+    params = {"$filename": source_filename or config.source_filename(doc_name)}
     if search_terms:
-        conjuncts.append(
-            '{"match": $terms, "field": "text-to-embed", "operator": "or"}')
-        params["$terms"] = search_terms
+        # A forced phrase is a DISJUNCT alongside the bag-of-words match, not
+        # an extra required conjunct - "either finds it" is the point, same
+        # as Path A's own lexical leg (prism/retrieval/hybrid_search.py). A
+        # top-level conjunct here would instead require BOTH to match, which
+        # is a much narrower (and wrong) search than what #...# is for.
+        cleaned_terms, phrases = retrieval.extract_phrase_terms(search_terms)
+        term_disjuncts = ['{"match": $terms, "field": "text-to-embed", '
+                         '"operator": "or"}']
+        params["$terms"] = cleaned_terms
+        for i, phrase in enumerate(phrases):
+            key = f"$phrase_{i}"
+            term_disjuncts.append(f'{{"match_phrase": {key}, "field": "text-to-embed"}}')
+            params[key] = phrase
+        conjuncts.append(f'{{"disjuncts": [{", ".join(term_disjuncts)}]}}')
         # A term search should surface the best match first, not page order -
         # on 3M's 2022 10-K, "current assets" in page order buries the
         # Working Capital table (page 38, which nets current assets against
@@ -700,7 +726,7 @@ def render_pipeline_trace(run: dict):
                      icon=":material/fact_check:"):
         st.caption("Evaluation-only. This is not part of a production answer path.")
         for number, event in enumerate(llms["judge"], 1):
-            show_llm_exchange(event, "FinanceBench judge"
+            show_llm_exchange(event, "Gold-answer judge"
                               + (f" · call {number}" if len(llms["judge"]) > 1 else ""))
         status_badge(run["verdict"]["passed"])
         st.write(run["verdict"].get("comment", ""))
@@ -757,7 +783,7 @@ RESULTS_TABLE_CSS = """
 """
 
 RESULT_COLUMNS = [
-    ("Status", "9%"), ("Question", "19%"), ("FinanceBench answer", "21%"),
+    ("Status", "9%"), ("Question", "19%"), ("Gold answer", "21%"),
     ("PRISM answer", "25%"), ("Why", "15%"), ("Document", "11%"),
 ]
 
@@ -845,8 +871,8 @@ def render_batch(runs: list, company: str, phase: str, model: str):
             bottom[2].metric("Avg latency", f"{avg_seconds:.1f}s", icon=":material/speed:")
 
     st.html(results_table_html(runs))
-    st.caption("Pass means convergence with FinanceBench's chosen convention, not an "
-               "assertion that other defensible conventions are objectively wrong.")
+    st.caption("Pass means convergence with the gold answer's chosen convention, not "
+               "an assertion that other defensible conventions are objectively wrong.")
 
     # A failing row raises "why?", and the trace is the answer - so make it
     # reachable without re-running the question on its own.
@@ -879,12 +905,38 @@ def render_detail(run: dict):
         cols = st.columns(2)
         with cols[0]:
             st.caption("Custom question — no reference" if q["id"] == "custom"
-                      else "FinanceBench reference")
+                      else "Gold answer")
             st.write(q["expected_answer"])
+            gold = q.get("gold_answer")
+            if gold and gold.get("value") is not None:
+                tolerance = f" ± {gold['tolerance']}" if gold.get("tolerance") else ""
+                st.caption(f"{gold['value']} {gold.get('unit', '')}{tolerance}".strip())
         with cols[1]:
             st.caption("PRISM answer")
             st.write(result["answer"])
         st.caption(verdict.get("comment", ""))
+
+        # Concept/formula/evidence are ftsprism-native fields (see
+        # eval/corpora/ftsprism.py's questions()) - absent for a custom
+        # question or any corpus that doesn't carry them, so this only shows
+        # up when there's something real to show, not an empty shell.
+        if q.get("concept") or q.get("formula") or q.get("evidence"):
+            with st.expander("Gold answer detail", icon=":material/verified:"):
+                if q.get("concept"):
+                    st.caption(f"Concept: {q['concept']}")
+                if q.get("formula"):
+                    st.code(q["formula"], language=None)
+                for tag in q.get("tags") or []:
+                    st.badge(tag, color="gray")
+                for evidence in q.get("evidence") or []:
+                    label = f"p{evidence.get('page', '?')}"
+                    if evidence.get("title"):
+                        label += f" · {evidence['title']}"
+                    if evidence.get("type"):
+                        label += f" · {evidence['type']}"
+                    st.markdown(f"**{label}**")
+                    if evidence.get("text"):
+                        st.caption(evidence["text"])
 
     metrics = st.columns(4, border=True)
     metrics[0].metric("Elapsed", f"{stats['elapsed_ms'] / 1000:.2f}s",
@@ -1098,9 +1150,11 @@ with st.sidebar:
     custom_question = st.text_area(
         "Or ask your own question", placeholder=f"Ask anything about {company}'s filings…",
         help="Runs the same pipeline, scoped to the company selected above. There is "
-             "no FinanceBench reference for a custom question, so it is not scored — "
+             "no gold reference for a custom question, so it is not scored — "
              "the trace and answer still show in full. Overrides the selection above "
-             "when non-empty.")
+             "when non-empty. Wrap a span in #hashes# (e.g. `#John Doe#`) to force an "
+             "exact-phrase match on it alongside the usual BM25 leg — good for a named "
+             "individual or exact term BM25's bag-of-words alone won't disambiguate.")
     phase = st.selectbox("Retrieval architecture", sorted(phases.PHASES),
                          index=sorted(phases.PHASES).index(phases.DEFAULT_PHASE),
                          format_func=lambda p: phases.LABELS.get(p, p))
@@ -1175,7 +1229,7 @@ with st.sidebar:
             st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
 
 if custom_question.strip():
-    # No FinanceBench reference exists for a question nobody wrote a gold
+    # No gold reference exists for a question nobody wrote a gold
     # answer for - expected_answer is a display string, not data judge.score
     # runs against; run_one() checks question["id"] == "custom" and skips
     # scoring entirely rather than judging against this placeholder text.
@@ -1214,29 +1268,32 @@ with tab_setup:
                "normal case, not a special one.")
 
     section("Upload sample PDFs to S3", icon=":material/upload:",
-            caption="Straight upload, no S3 object metadata - one subfolder per "
-                    "company, matching eval/corpora/ftsprism/pdfs/{company}/ "
-                    "exactly. Credentials are used for this upload only - never "
-                    "written to disk, a config file, or session state beyond the "
-                    "click that submits them.")
+            caption="Straight upload, no S3 object metadata, no per-company "
+                    "subfolder - flat into the one folder below, matching what "
+                    "the ingestion workflow and config.source_filename() both "
+                    "expect. Bucket/folder/region come from .env, the same "
+                    "values retrieval uses - not re-typed here, so they can't "
+                    "drift out of sync with each other. Credentials are used "
+                    "for this upload only - never written to disk, a config "
+                    "file, or session state beyond the click that submits them.")
     pdf_root = REPO_ROOT / "eval" / "corpora" / "ftsprism" / "pdfs"
     available = s3_upload.find_pdfs(pdf_root)
     by_company = {}
     for company, path in available:
         by_company.setdefault(company, []).append(path)
+    s3_bucket_env = os.environ.get("AWS_BUCKET")
+    s3_folder_env = os.environ.get("AWS_FOLDER")
     if not available:
         st.info(f"No PDFs found under {pdf_root} yet.", icon=":material/info:")
+    elif not (s3_bucket_env and s3_folder_env):
+        st.error("AWS_BUCKET and AWS_FOLDER must be set in .env before "
+                 "uploading - see .env.example.", icon=":material/error:")
     else:
         st.caption(", ".join(f"{c} ({len(p)})" for c, p in sorted(by_company.items()))
-                  + f" — {len(available)} PDF(s) total")
+                  + f" — {len(available)} PDF(s) total, uploading flat to "
+                    f"s3://{s3_bucket_env}/{s3_folder_env.strip('/')}/")
         with st.form("s3_upload_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                s3_bucket = st.text_input("S3 bucket name")
-                s3_region = st.text_input("AWS region", value="us-west-2")
-            with col2:
-                s3_prefix = st.text_input("Folder (prefix)", value="ftsprism")
-                s3_access_key = st.text_input("AWS access key ID", type="password")
+            s3_access_key = st.text_input("AWS access key ID", type="password")
             s3_secret_key = st.text_input("AWS secret access key", type="password")
             s3_session_token = st.text_input(
                 "AWS session token (optional, for temporary credentials)",
@@ -1244,8 +1301,8 @@ with tab_setup:
             submitted = st.form_submit_button(
                 "Upload to S3", icon=":material/upload:", width="stretch")
         if submitted:
-            if not (s3_bucket and s3_access_key and s3_secret_key):
-                st.error("Bucket name, access key and secret key are required.")
+            if not (s3_access_key and s3_secret_key):
+                st.error("Access key and secret key are required.")
             else:
                 progress_bar = st.progress(0.0)
                 progress_line = st.empty()
@@ -1253,13 +1310,11 @@ with tab_setup:
                 def on_s3_progress(i, total, company, filename, ok, error=None):
                     progress_bar.progress(i / total)
                     progress_line.caption(
-                        f"[{i}/{total}] {company}/{filename}"
+                        f"[{i}/{total}] {filename}"
                         + ("" if ok else f" — ERROR: {error}"))
 
                 result = s3_upload.upload_pdfs(
-                    pdf_root, bucket=s3_bucket.strip(), prefix=s3_prefix.strip(),
-                    access_key=s3_access_key, secret_key=s3_secret_key,
-                    region=s3_region.strip(),
+                    pdf_root, access_key=s3_access_key, secret_key=s3_secret_key,
                     session_token=s3_session_token.strip() or None,
                     on_progress=on_s3_progress)
                 if result["failed"]:
@@ -1269,7 +1324,7 @@ with tab_setup:
                                       for f in result["failed"]))
                 else:
                     st.success(f"{len(result['uploaded'])}/{len(available)} PDF(s) "
-                              f"uploaded to s3://{s3_bucket}/{s3_prefix}/")
+                              f"uploaded to s3://{s3_bucket_env}/{s3_folder_env.strip('/')}/")
 
     st.space("medium")
     section("Create the ingestion workflow", icon=":material/account_tree:",
@@ -1351,7 +1406,7 @@ with tab_ask:
                               f"{selected_question['doc_name']}")
             else:
                 st.markdown(f"#### Run all {len(company_questions)} {company} questions")
-                st.caption("The results dashboard will compare FinanceBench and PRISM answers.")
+                st.caption("The results dashboard will compare the gold answer and PRISM's answer.")
         with action_area:
             run_label = "Run all" if selected_question is None else "Run trace"
             run_clicked = st.button(run_label, type="primary", icon=":material/play_arrow:",
@@ -1397,7 +1452,9 @@ with tab_workbench:
                "(BM25, same as the retrieval path), no PDF access needed. The "
                "embedding vector is left out of what's shown here; 2048 floats add "
                "nothing to read. Search terms search the WHOLE document, ignoring "
-               "the page number - without terms, Page scopes to one page.")
+               "the page number - without terms, Page scopes to one page. Wrap a "
+               "span in #hashes# (e.g. `#John Doe#`) to force an exact-phrase match "
+               "on it alongside the usual BM25 terms.")
     wb_cols = st.columns([2, 3, 1, 2.5])
     with wb_cols[0]:
         wb_company = st.selectbox("Company", companies, key="wb_company")
@@ -1410,12 +1467,15 @@ with tab_workbench:
         wb_page = st.number_input("Page", min_value=1, step=1, key="wb_page")
     with wb_cols[3]:
         wb_terms = st.text_input("Search terms (optional)", key="wb_terms",
-                                 placeholder="e.g. total current assets")
+                                 placeholder='e.g. total current assets, or #John Doe#')
     if st.button("Fetch", icon=":material/search:", key="wb_fetch",
                 disabled=not wb_doc_names):
         terms = wb_terms.strip() or None
+        wb_entry = next((d for d in company_catalog(catalog_docs, wb_company)
+                         if d.get("doc_name") == wb_doc), None)
         chunks = fetch_chunks(wb_doc, page=None if terms else int(wb_page),
-                              search_terms=terms, limit=WORKBENCH_FETCH_LIMIT)
+                              search_terms=terms, limit=WORKBENCH_FETCH_LIMIT,
+                              source_filename=(wb_entry or {}).get("source_filename"))
         if not chunks:
             st.info("No chunks found for that document and filter.")
         else:
@@ -1437,7 +1497,13 @@ with tab_workbench:
                     label += f" · score {chunk.get('_score', 0):.3f}"
                 with st.expander(label):
                     if terms:
+                        # Strip #...# hashes before highlighting - the raw
+                        # terms would search for the literal substring
+                        # "#John" (never present in the text), silently
+                        # highlighting nothing for exactly the words a phrase
+                        # search cares most about.
+                        highlight_words, _ = retrieval.extract_phrase_terms(terms)
                         st.markdown("**Matched text, terms highlighted:**")
-                        st.html(highlight_terms(chunk.get("text-to-embed"), terms))
+                        st.html(highlight_terms(chunk.get("text-to-embed"), highlight_words))
                         st.divider()
                     st.json(chunk, expanded=True)
