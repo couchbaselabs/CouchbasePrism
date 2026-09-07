@@ -42,10 +42,27 @@ def query(statement: str, params: dict = None, timeout: int = 60) -> list:
             # doesn't carry; the connection is still TLS.
             verify=False, timeout=timeout,
         )
-        resp.raise_for_status()
-        result = resp.json()
-        if result.get("status") != "success":
+        # Couchbase returns a structured error body (status/errors) even on a
+        # non-2xx HTTP status - verified live: a missing primary index comes
+        # back as HTTP 404 with a perfectly informative body (code 4000, "No
+        # index available on keyspace ... CREATE PRIMARY INDEX ..."). Reading
+        # that FIRST, before raise_for_status(), means a real Couchbase error
+        # always surfaces with its own message; raise_for_status() only fires
+        # when the response isn't valid JSON at all (a proxy/network failure
+        # upstream of Couchbase), where there is no better message to give
+        # than the HTTP status. Checking status naively first, then calling
+        # raise_for_status() unconditionally, is exactly what silently threw
+        # away this detail before this was fixed - a bare "404 Client Error:
+        # Not Found for url: ..." with the actual cause never read.
+        try:
+            result = resp.json()
+        except ValueError:
+            result = None
+        if result is not None and result.get("status") != "success":
             raise QueryError(f"{result.get('errors')}\nstatement: {statement}")
+        if result is None:
+            resp.raise_for_status()
+            raise QueryError(f"non-JSON response from query service\nstatement: {statement}")
         rows = result.get("results", [])
         trace.add("couchbase_query", statement=statement.strip(), params=params or {},
                   row_count=len(rows), status=result.get("status"),

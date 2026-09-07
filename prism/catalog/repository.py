@@ -1,6 +1,6 @@
 """Persistence for catalog documents: {bucket}.{scope}.catalog, keyed by doc_name."""
 from .. import config
-from ..couchbase_io import ensure_primary_index, query, search_facet
+from ..couchbase_io import QueryError, ensure_primary_index, query, search_facet
 
 
 def upsert(document: dict) -> None:
@@ -25,13 +25,25 @@ def delete_all() -> int:
 
 def load_all() -> list:
     """Only the fields resolution needs. `value` is a reserved word in N1QL and
-    must be backticked in the projection."""
-    return query(
-        "SELECT d.doc_name, d.doc_type.`value` AS doc_type, d.doc_period, "
-        "d.period_end_date_iso, d.company.`value` AS company, d.gics_sector, "
-        "d.aliases "
-        f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d"
-    )
+    must be backticked in the projection.
+
+    Tolerates a missing primary index specifically - "no catalogued documents
+    yet, Initialize has never run" is an expected state on a fresh
+    environment (Initialize's own `ensure_primary_index` step exists exactly
+    because this can happen), not an error worth crashing a caller over.
+    Anything else still raises - a genuine query error should never read as
+    an empty catalog."""
+    try:
+        return query(
+            "SELECT d.doc_name, d.doc_type.`value` AS doc_type, d.doc_period, "
+            "d.period_end_date_iso, d.company.`value` AS company, d.gics_sector, "
+            "d.aliases, d.source_filename "
+            f"FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.CATALOG_COLLECTION}` AS d"
+        )
+    except QueryError as e:
+        if "No index available" in str(e):
+            return []
+        raise
 
 
 def companies() -> list:
