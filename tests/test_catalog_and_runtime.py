@@ -3,6 +3,7 @@ validation and conclusion agreement. Each case below corresponds to a bug that
 actually occurred during the FinanceBench evaluation."""
 from prism import catalog, retrieval, runtime, trace
 from prism.catalog.extraction import _chunk_sort_key
+from prism.catalog.resolver import period_from_question
 
 CATALOG = [
     {"doc_name": "3M_2018_10K", "doc_type": "10-K", "doc_period": 2018,
@@ -64,6 +65,23 @@ def test_quarter_mention_selects_the_10q_not_the_annual():
         CATALOG, "quick ratio for Q2 of FY2023?") == "3M_2023Q2_10Q"
 
 
+def test_spelled_out_quarter_selects_the_10q_not_the_annual():
+    # "Q2" and "the second quarter" are the same fact, worded two ways - a
+    # hand-authored question phrased naturally ("the third quarter of 2022")
+    # used to fall through to the annual filing silently, a real document,
+    # confidently wrong, discovered live on ftsprism's own
+    # 3m-2022-q3-quick-ratio question: it resolved to 3M_2022_10K instead of
+    # 3M_2022_Q3_10Q. period_from_question's own unit behavior (which quarter
+    # NUMBER a spelled-out phrase maps to, "third" -> 3 specifically) is
+    # covered directly in test_period_from_question.py-style spot checks;
+    # this just confirms the wording reaches resolve_for_question at all.
+    assert catalog.resolve_for_question(
+        CATALOG, "quick ratio at the end of the second quarter of 2023?") \
+        == "3M_2023Q2_10Q"
+    assert catalog.resolve_for_question(
+        CATALOG, "quick ratio for the 2nd quarter of 2023?") == "3M_2023Q2_10Q"
+
+
 def test_fiscal_year_selects_the_annual_filing():
     assert catalog.resolve_for_question(
         CATALOG, "FY2018 capital expenditure?") == "3M_2018_10K"
@@ -72,6 +90,24 @@ def test_fiscal_year_selects_the_annual_filing():
 def test_no_period_mentioned_falls_back_to_most_recent():
     assert catalog.resolve_for_question(
         CATALOG, "Does 3M maintain a stable dividend?") == "3M_2023Q2_10Q"
+
+
+def test_period_from_question_maps_each_spelled_out_ordinal_to_its_own_quarter():
+    # Not just "some quarter word matches" - "third" must specifically mean
+    # 3, not whichever quarter happens to be the only one on hand.
+    assert period_from_question("the third quarter of 2022") == (2022, 3)
+    assert period_from_question("the 3rd quarter of 2022") == (2022, 3)
+    assert period_from_question("the first quarter of 2021") == (2021, 1)
+    assert period_from_question("the 2nd quarter of 2023") == (2023, 2)
+    assert period_from_question("the fourth quarter of 2020") == (2020, 4)
+
+
+def test_period_from_question_still_recognizes_q_shorthand():
+    assert period_from_question("Q2 of FY2023") == (2023, 2)
+
+
+def test_period_from_question_with_no_quarter_mentioned():
+    assert period_from_question("FY2022 revenue") == (2022, None)
 
 
 # ------------------------------------------------------------- identifiers

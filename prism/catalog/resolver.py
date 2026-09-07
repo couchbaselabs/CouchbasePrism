@@ -147,11 +147,29 @@ def event_date_from_question(question: str):
     return None
 
 
+_QUARTER_WORDS = {"1st": 1, "first": 1, "2nd": 2, "second": 2,
+                  "3rd": 3, "third": 3, "4th": 4, "fourth": 4}
+_QUARTER_WORD_PATTERN = re.compile(
+    r"\b(" + "|".join(_QUARTER_WORDS) + r")\s+quarter\b", re.IGNORECASE)
+
+
 def period_from_question(question: str):
+    """"Q3" and "third quarter" are the same fact, worded two ways - FinanceBench's
+    own questions apparently only ever use the "Q2 2023" shorthand, which is
+    why this gap went unnoticed there. A hand-authored question asking
+    naturally ("the third quarter of 2022") is exactly the phrasing a real
+    person uses, and resolve() silently fell through to the annual filing
+    whenever this returned None instead of an actual quarter - a real
+    document, confidently wrong, the same failure shape as the FY-range bug
+    below."""
     quarter = None
     m = re.search(r"\bQ([1-4])\b", question, re.IGNORECASE)
     if m:
         quarter = int(m.group(1))
+    else:
+        m = _QUARTER_WORD_PATTERN.search(question)
+        if m:
+            quarter = _QUARTER_WORDS[m.group(1).lower()]
     # A question spanning two periods ("FY2015 to FY2016", "between FY2021
     # and FY2022") is asking about CHANGE - the right source is the LATER
     # period's filing, since a 10-K/10-Q reports its period alongside the
