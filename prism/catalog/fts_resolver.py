@@ -26,9 +26,23 @@ Two stages, not one call:
      genuinely needs more than one filing, are both real outcomes this
      reports rather than papers over by forcing a single confident pick.
 
-This is a NEW, separate resolution path - PipelineOptions.resolution picks
-between this and the deterministic resolver.py path, exactly so the two can
-be compared rather than one silently replacing the other unproven.
+This is THE resolution path pipeline.answer_question() uses - not one of a
+choice. It briefly existed as an opt-in alongside resolver.py's deterministic
+path specifically so the two could be compared before committing; once
+compared (verified live against all three bugs above, plus a genuine
+out-of-corpus question that correctly declined rather than guessing), the
+choice itself became the thing worth removing: "too many knobs leads to
+confusion" - one resolution mechanism, not a runtime setting nobody but an
+engineer would know how to pick between. resolver.py's functions stay in the
+codebase (still tested, form_of() is a real dependency here too via
+extraction.py's search_label building) but are no longer called by the live
+pipeline.
+
+Also generalizes past what regex ever could once PRISM covers a domain where
+dates aren't the primary disambiguator - a healthcare or research-paper
+catalog might resolve by cohort, trial phase, or subject matter instead,
+which is exactly the kind of signal an LLM reads naturally and a
+period-focused regex has no notion of at all.
 """
 from .. import config, llm
 from ..couchbase_io import query

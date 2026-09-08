@@ -619,17 +619,13 @@ def render_pipeline_trace(run: dict):
     with st.expander("1 · Filter — resolve the governed document scope", expanded=True,
                      icon=":material/filter_alt:"):
         st.markdown("**In** · user question + company-filtered catalog  ")
-        if options.resolution == "fts_llm":
+        if options.catalog_filter:
             st.markdown("**Work** · one SEARCH() against the catalog's own index narrows to "
                         "a shortlist, then a cheap LLM call picks from it (or declines) - "
                         "no full catalog scan, no regex parsing the question's phrasing.  ")
             for number, event in enumerate(llms["catalog"], 1):
                 show_llm_exchange(event, "Catalog resolver"
                                   + (f" · call {number}" if len(llms["catalog"]) > 1 else ""))
-        elif options.catalog_filter:
-            st.markdown("**Work** · parse fiscal period and filing type; resolve against the "
-                        "catalog before semantic search. The catalog is loaded once, then this "
-                        "per-question resolution is deterministic application code.  ")
         else:
             st.markdown("**Work** · catalog filtering is intentionally disabled in this "
                         "baseline phase, so retrieval searches the corpus.  ")
@@ -1203,22 +1199,6 @@ with st.sidebar:
     else:
         fusion = None
         tuning = {}
-
-    resolution = st.segmented_control(
-        "Document resolution", ["deterministic", "fts_llm"], default="deterministic",
-        required=True, width="stretch",
-        format_func=lambda r: {"deterministic": "Deterministic (regex)",
-                              "fts_llm": "AI (FTS shortlist + LLM pick)"}[r])
-    st.caption(
-        "Regex-based year/quarter/date parsing over the whole catalog in "
-        "Python - fast, but found 3 real gaps this session on natural "
-        "phrasing it wasn't written to expect."
-        if resolution == "deterministic" else
-        "Catalog's own search index narrows to a shortlist, a cheap LLM call "
-        "picks from it - scales past what loading the whole catalog into "
-        "Python can, and isn't limited to phrasing a regex anticipated. New "
-        "and less battle-tested than the deterministic path.")
-    tuning["resolution"] = resolution
 
     provider = st.segmented_control("Model provider", ["OpenAI", "Amazon Bedrock"],
                                     default="OpenAI", required=True, width="stretch")

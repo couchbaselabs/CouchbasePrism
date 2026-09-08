@@ -51,14 +51,6 @@ def describe_source(entry: dict) -> str:
 class PipelineOptions:
     """Which capabilities are active. Defaults are the full runtime."""
     catalog_filter: bool = True   # scope retrieval to one resolved document
-    resolution: str = "deterministic"  # "deterministic" (resolver.py, regex-
-                                       # based) or "fts_llm" (catalog/
-                                       # fts_resolver.py: FTS shortlist + a
-                                       # cheap LLM pick) - a NEW, separate
-                                       # path kept opt-in specifically so it
-                                       # can be compared against the
-                                       # deterministic one, not silently
-                                       # replace it unproven.
     anchors: bool = True          # content-anchor retrieval from the plan
     bm25: bool = False            # hybrid BM25 + kNN via the Search Vector Index
     title_boost: float = 0.0      # boost associated-titles in BM25 (unreliable)
@@ -90,10 +82,21 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     # leg, further down; it is a no-op for every other retrieval path.
     question, forced_phrases = retrieval.extract_phrase_terms(question)
 
+    # FTS shortlist + a cheap LLM pick (catalog/fts_resolver.py) - the ONLY
+    # resolution path, not a choice. resolver.py's deterministic regex path
+    # (still in the codebase, still tested - form_of() in particular is a
+    # real dependency of extraction.py's search_label building) found real,
+    # matching bugs three separate times in one day of real questions, each
+    # a mechanism built for one phrasing failing on another it was never
+    # meant to handle. A second knob here to pick between them was tried and
+    # explicitly rejected: "too many knobs leads to confusion" - settle on
+    # one, and this is the one that generalizes past dates (concepts, once
+    # PRISM covers a domain where dates aren't the only disambiguator) and
+    # scales past what loading the whole catalog into Python can.
     resolution_detail = None
     if not options.catalog_filter:
         doc_name = None
-    elif options.resolution == "fts_llm":
+    else:
         # search_candidates()/llm_resolve() never load catalog_docs at all -
         # the whole point is not needing the full catalog in Python to
         # resolve one question. catalog_docs is still used below to look up
@@ -102,8 +105,6 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         resolution_detail = catalog.resolve_for_question_at_scale(question, model=model)
         picked = resolution_detail.get("selected_documents") or []
         doc_name = picked[0]["doc_name"] if picked else None
-    else:
-        doc_name = catalog.resolve_for_question(catalog_docs, question)
     # Built from the catalog, so the prompt stays generic and the corpus
     # supplies the specifics.
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)

@@ -5,11 +5,16 @@ semantic search happens.
 
     extraction  cover page (PDF or already-ingested chunks) -> catalog document
     repository  persistence in {bucket}.{scope}.catalog
-    resolver    question -> which doc_name it is about (deterministic, regex)
+    resolver    question -> which doc_name it is about (deterministic, regex -
+                not used by the live pipeline; see fts_resolver below for why.
+                Still here, still tested: form_of() is a real dependency of
+                extraction.py's search_label building.)
     fts_resolver  question -> which doc_name it is about (FTS shortlist + LLM
-                  pick - scales past what resolver.py can, since it never
-                  loads the full catalog into Python; PipelineOptions.resolution
-                  picks between the two)
+                  pick) - THE resolution path pipeline.answer_question() uses,
+                  not one of a choice. Scales past what resolver.py's full-
+                  catalog Python scan can, and found real bugs in three
+                  separate regex mechanisms in one day of real questions -
+                  each built for one phrasing, failing on another.
 """
 from .extraction import (  # noqa: F401
     CLASSIFY_SYSTEM_PROMPT, COVER_PAGES, FIELDS,
