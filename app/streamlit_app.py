@@ -594,7 +594,12 @@ def render_pipeline_trace(run: dict):
     q, result, events = run["question"], run["result"], run["events"]
     llm_events = [e for e in events if e.get("type") == "llm_call"]
     llms = {role: [e for e in llm_events if llm_role(e) == role]
-            for role in ("planner", "candidate", "binder", "answer", "judge")}
+            for role in ("planner", "candidate", "binder", "answer", "judge",
+                        "catalog")}  # "catalog" = fts_resolver.llm_resolve(),
+                                     # present only when Document resolution
+                                     # = AI; classify_cover() also tags
+                                     # "catalog" but runs during Initialize,
+                                     # never inside an answer_question() trace
     # Every call must surface somewhere. When classification silently dropped
     # calls into the wrong bucket, the trace lost the planner and binder
     # prompts entirely and looked merely sparse rather than broken.
@@ -614,7 +619,14 @@ def render_pipeline_trace(run: dict):
     with st.expander("1 · Filter — resolve the governed document scope", expanded=True,
                      icon=":material/filter_alt:"):
         st.markdown("**In** · user question + company-filtered catalog  ")
-        if options.catalog_filter:
+        if options.resolution == "fts_llm":
+            st.markdown("**Work** · one SEARCH() against the catalog's own index narrows to "
+                        "a shortlist, then a cheap LLM call picks from it (or declines) - "
+                        "no full catalog scan, no regex parsing the question's phrasing.  ")
+            for number, event in enumerate(llms["catalog"], 1):
+                show_llm_exchange(event, "Catalog resolver"
+                                  + (f" · call {number}" if len(llms["catalog"]) > 1 else ""))
+        elif options.catalog_filter:
             st.markdown("**Work** · parse fiscal period and filing type; resolve against the "
                         "catalog before semantic search. The catalog is loaded once, then this "
                         "per-question resolution is deterministic application code.  ")
