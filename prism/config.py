@@ -219,12 +219,20 @@ LLM_TIMEOUT = int(os.environ.get("PRISM_LLM_TIMEOUT", 300))
 # throwaway.
 STAGE_ROLE = {
     "planner": "planner",
+    "resolve_and_plan": "planner",  # catalog.intent + retrieval.planner,
+    # combined into one call (runtime/resolve_and_plan.py) - planner tier
+    # since planning quality is what mattered most between the two separate
+    # calls this replaced. utility and planner both default to the same
+    # model today anyway (every role does - see MODEL_* above), so this
+    # merge costs no tier separation that existed in practice to lose.
     "candidate": "planner",
     "binder": "answer",
     "answer": "answer",
     "judge": "judge",
     "anchor_repair": "utility",
-    "catalog": "utility",
+    "catalog": "utility",  # still used: classify_cover() at catalog-build
+    # time, and fts_resolver.llm_resolve() if ever called standalone/tested -
+    # neither runs inside answer_question() anymore.
 }
 
 

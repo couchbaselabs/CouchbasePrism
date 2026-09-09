@@ -112,11 +112,12 @@ MODEL_OPTIONS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5",
 # read as one pipeline instead of two different orderings.
 MODEL_ROLES = [
     ("utility", "Catalog matching", "gpt-5.4",
-     "Step 1 (Filter), mostly at ingestion: extracted company, form and period "
-     "across 354 documents without a failure. Also covers anchor repair, off "
-     "by default. Cheap and high volume."),
+     "Ingestion-time only now: extracted company, form and period across 354 "
+     "documents without a failure while building the catalog. Also covers "
+     "anchor repair, off by default. Cheap and high volume."),
     ("planner", "Planner", "gpt-5.4",
-     "Steps 2 (Plan) and 4 (Govern): the evidence plan, and - only when "
+     "Steps 1+2 (Filter, Plan - one combined call) and 4 (Govern): resolves "
+     "the document scope and the evidence plan together, and - only when "
      "nothing approved matches - candidate calculation conventions. Proposes "
      "structure it cannot verify."),
     ("answer", "Bind + answer", "gpt-5.4",
@@ -594,12 +595,18 @@ def render_pipeline_trace(run: dict):
     q, result, events = run["question"], run["result"], run["events"]
     llm_events = [e for e in events if e.get("type") == "llm_call"]
     llms = {role: [e for e in llm_events if llm_role(e) == role]
-            for role in ("planner", "candidate", "binder", "answer", "judge",
-                        "catalog")}  # "catalog" = fts_resolver.llm_resolve(),
-                                     # present only when Document resolution
-                                     # = AI; classify_cover() also tags
-                                     # "catalog" but runs during Initialize,
-                                     # never inside an answer_question() trace
+            for role in ("resolve_and_plan", "planner", "candidate", "binder",
+                        "answer", "judge", "catalog")}
+    # "resolve_and_plan" = runtime.resolve_and_plan() - the ONE call behind
+    # both step 1 (Filter) and step 2 (Plan) below; present whenever
+    # catalog_filter is on. "planner" only appears for the catalog_filter=
+    # False baseline phase, where resolve_and_plan() isn't called at all and
+    # plan_evidence() runs standalone instead - see pipeline.py. "catalog" =
+    # fts_resolver.llm_resolve()/catalog.intent's own standalone
+    # clarify_intent(), neither called by the live pipeline anymore;
+    # classify_cover() also tags "catalog" but runs during Initialize, never
+    # inside an answer_question() trace. Kept in this tuple so a call
+    # tagged with either never falls through to "unclassified" by surprise.
     # Every call must surface somewhere. When classification silently dropped
     # calls into the wrong bucket, the trace lost the planner and binder
     # prompts entirely and looked merely sparse rather than broken.
@@ -618,14 +625,19 @@ def render_pipeline_trace(run: dict):
 
     with st.expander("1 · Filter — resolve the governed document scope", expanded=True,
                      icon=":material/filter_alt:"):
-        st.markdown("**In** · user question + company-filtered catalog  ")
+        st.markdown("**In** · user question + the domain's catalog manifest  ")
         if options.catalog_filter:
-            st.markdown("**Work** · one SEARCH() against the catalog's own index narrows to "
-                        "a shortlist, then a cheap LLM call picks from it (or declines) - "
-                        "no full catalog scan, no regex parsing the question's phrasing.  ")
-            for number, event in enumerate(llms["catalog"], 1):
-                show_llm_exchange(event, "Catalog resolver"
-                                  + (f" · call {number}" if len(llms["catalog"]) > 1 else ""))
+            st.markdown("**Work** · one LLM call reads the manifest (companies/doc_types/"
+                        "years/quarters actually in the catalog - never the catalog itself) "
+                        "and returns a structured filter, ignoring subject-matter words "
+                        "entirely; an exact N1QL membership fetch then finds the matching "
+                        "document(s) - no ranking, nothing to guess. The SAME call also "
+                        "produces the evidence plan shown in step 2 below - see its "
+                        "Prompt/Response tabs here for the full exchange.  ")
+            for number, event in enumerate(llms["resolve_and_plan"], 1):
+                show_llm_exchange(event, "Resolve + plan"
+                                  + (f" · call {number}" if len(llms["resolve_and_plan"]) > 1
+                                     else ""))
         else:
             st.markdown("**Work** · catalog filtering is intentionally disabled in this "
                         "baseline phase, so retrieval searches the corpus.  ")
@@ -638,11 +650,18 @@ def render_pipeline_trace(run: dict):
     with st.expander("2 · Plan — identify the evidence the answer requires", expanded=True,
                      icon=":material/route:"):
         st.markdown("**In** · question  ")
-        st.markdown("**Work** · the planner identifies the concept, answer type, facts, "
-                    "artifact types and verbatim content anchors. No dictionary is required.  ")
-        for number, event in enumerate(llms["planner"], 1):
-            show_llm_exchange(event, "Evidence planner"
-                              + (f" · call {number}" if len(llms["planner"]) > 1 else ""))
+        if options.catalog_filter:
+            st.markdown("**Work** · the same call as step 1 above also identifies the "
+                        "concept, answer type, facts, artifact types and verbatim content "
+                        "anchors - see step 1's Prompt/Response tabs for the exchange. No "
+                        "dictionary is required.  ")
+        else:
+            st.markdown("**Work** · the planner identifies the concept, answer type, facts, "
+                        "artifact types and verbatim content anchors. No dictionary is "
+                        "required.  ")
+            for number, event in enumerate(llms["planner"], 1):
+                show_llm_exchange(event, "Evidence planner"
+                                  + (f" · call {number}" if len(llms["planner"]) > 1 else ""))
         st.markdown("**Out**")
         st.json(plan, expanded=True)
 

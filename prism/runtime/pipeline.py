@@ -16,35 +16,8 @@ from .. import catalog, config, dictionary, retrieval
 from .answer import synthesize
 from .calculation import candidate_facts, compute, propose_candidates
 from .fact_binding import bind_facts, grounded_facts, to_identifier, validate_bindings
+from .resolve_and_plan import resolve_and_plan
 from .validation import validate_conclusion
-
-
-def describe_source(entry: dict) -> str:
-    """One line naming the resolved document in its own terms.
-
-    Every field is optional and a missing one is simply left out, so this
-    degrades to less context rather than to a sentence with a hole in it. The
-    form is normalised for the prompt ("10-K", not "FORM 10-K") even though the
-    catalog stores what was printed - the prompt wants the concept, not the
-    evidence.
-
-    `gics_sector` is here because vocabulary is sector-specific in a way genre
-    alone does not capture: a Financials filing has no cost of goods sold, and a
-    planner that knows the sector can stop proposing labels that cannot exist.
-    """
-    if not entry:
-        return None
-    form = catalog.form_of(entry.get("doc_type")) or entry.get("doc_type")
-    bits = []
-    if form:
-        bits.append(f"a {form}")
-    if entry.get("company"):
-        bits.append(f"for {entry['company']}")
-    if entry.get("gics_sector"):
-        bits.append(f"in the {entry['gics_sector']} sector")
-    if entry.get("doc_period"):
-        bits.append(f"covering period {entry['doc_period']}")
-    return ("the source is " + " ".join(bits) + ".") if bits else None
 
 
 @dataclass(frozen=True)
@@ -56,7 +29,6 @@ class PipelineOptions:
     title_boost: float = 0.0      # boost associated-titles in BM25 (unreliable)
     governance: bool = True       # bind, compute, validate, consult the dictionary
     fusion: str = None            # "score" (Couchbase native) or "rrf"; None = config
-    source_context: bool = True   # tell the planner the resolved doc type/period
     # Retrieval tuning. None means "use the configured default", so a run that
     # touches no dial is identical to one from before the dials existed.
     rank_constant: int = None     # RRF only: 1/(k + rank)
@@ -92,51 +64,50 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     # leg, further down; it is a no-op for every other retrieval path.
     question, forced_phrases = retrieval.extract_phrase_terms(question)
 
-    # Intent Clarifier (catalog/intent.py) - the question plus the domain's
-    # manifest (one small aggregate document, not the catalog itself) goes to
-    # a cheap model that returns a STRUCTURED filter (companies/doc_types/
-    # years), then an exact N1QL membership fetch on those values - the ONLY
-    # resolution path, not a choice. Replaced fts_resolver.py's FTS-shortlist-
-    # then-LLM-pick: once the filter is structured and drawn from the
-    # manifest's own known vocabulary, there is no free text left to rank,
-    # only to fetch. fts_resolver.py (and resolver.py's deterministic path
-    # before it) stay in the codebase, still tested, not called - the same
-    # "settle on one, not a toggle" reasoning each replacement has followed.
+    # Resolve + Plan (runtime/resolve_and_plan.py) - one LLM call doing what
+    # used to be two (catalog.intent's Intent Clarifier, then
+    # retrieval.planner's evidence planner): both read the same raw question
+    # as their primary input, and neither's reasoning depended on the
+    # other's structured output - the only thing that crossed between them,
+    # a one-line "resolved doc type/period" hint into the planner, is now
+    # unnecessary, since the model already knows what it just resolved
+    # within the same completion. See that module for why combining the
+    # CALL does not combine the CONCERNS (resolution stays manifest-driven
+    # and corpus-specific; evidence planning stays domain-free).
     #
-    # The Clarifier can return a document SET (a company-wide, multi-year
-    # question resolves to more than one document by design) - only one is
-    # used below. That is a known, real gap, not papered over: the
-    # multi-document retrieve+bind+compute+synthesize pipeline this exists to
-    # feed has not been built yet.
+    # Only ONE document from the resolved set reaches retrieval below - a
+    # known, real gap, not papered over: the multi-document retrieve+bind+
+    # compute+synthesize pipeline a company-wide, multi-year resolution
+    # exists to feed has not been built yet. The one used is the MOST RECENT
+    # year (then quarter) in the set, not documents[0] - verified live this
+    # was not cosmetic: the N1QL fetch carries no ORDER BY, so documents[0]
+    # was whichever the server happened to return first, and that silently
+    # answered a "2023 vs FY2022" question from 2022's own figures, and
+    # separately a "third quarter of 2022" question from Q1's 10-Q - both
+    # confident, cited, WRONG answers, not a decline. This sort is a
+    # defensive floor, not a fix for the gap above: with only ever one
+    # document reaching retrieval, latest-year-then-latest-quarter is the
+    # least-wrong single guess when the model's own consolidation/quarter
+    # guidelines (see resolve_and_plan.py's prompt) do not collapse the set
+    # to one document on their own.
     #
-    # The one used is the MOST RECENT year (then quarter) in the set, not
-    # documents[0] - verified live this was not cosmetic: resolve_documents()'s
-    # N1QL fetch carries no ORDER BY, so documents[0] was whichever the server
-    # happened to return first. That silently answered a "2023 vs FY2022"
-    # question from the 2022 10-K's own figures (19.1% margin instead of the
-    # correct -27.9%) and, separately, a "third quarter of 2022" question from
-    # Q1's 10-Q instead of Q3's - both confident, cited, WRONG answers, not a
-    # decline. This is a defensive floor, not a fix for either real gap above:
-    # with only ever one document reaching retrieval, latest-year-then-latest-
-    # quarter is the least-wrong single guess when the Clarifier's own
-    # consolidation/quarter guidelines (see intent.py's prompt) do not collapse
-    # the set to one document on their own.
+    # catalog_filter=False (the unscoped baseline eval phase) skips
+    # resolution but still needs a plan - plan_evidence() alone, not the
+    # combined call, since there is no manifest-scoped resolution to do.
     resolution_detail = None
     if not options.catalog_filter:
         doc_name = None
+        plan = retrieval.plan_evidence(question, model=model)
     else:
-        resolution_detail = catalog.resolve_intent(question, scope=scope, model=model)
+        resolution_detail = resolve_and_plan(question, scope=scope, model=model)
         documents = sorted(
             resolution_detail.get("documents") or [],
             key=lambda d: (d.get("doc_period") or 0,
                           catalog.quarter_of(d.get("period_end_date_iso")) or 0),
             reverse=True)
         doc_name = documents[0]["doc_name"] if documents else None
-    # Built from the catalog, so the prompt stays generic and the corpus
-    # supplies the specifics.
+        plan = resolution_detail["plan"]
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)
-    context = describe_source(entry) if options.source_context else None
-    plan = retrieval.plan_evidence(question, model=model, source_context=context)
     weights = {k: v for k, v in (("bm25", options.bm25_weight),
                                  ("vector", options.vector_weight)) if v is not None}
     chunks = retrieval.retrieve(question, plan, doc_name,
@@ -206,7 +177,6 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         "question": question,
         "forced_phrases": forced_phrases,
         "resolution_detail": resolution_detail,
-        "source_context": context,
         "computation_skipped": kind == "attribution",
         "options": options,
         "resolved_doc": doc_name,

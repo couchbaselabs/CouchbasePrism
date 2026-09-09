@@ -1,5 +1,9 @@
 """The runtime: bind -> calculate -> validate -> answer (design/architecture.md §1).
 
+    resolve_and_plan  question -> which document(s) + what evidence to look
+                      for - catalog resolution and evidence planning in one
+                      LLM call (see the module for why combining the call
+                      does not combine the concerns)
     fact_binding  retrieved text -> named facts with entity/period/column/provenance
     calculation   bound facts    -> governed value, or labeled candidates
     validation    values         -> is a conclusion authorised?
@@ -21,4 +25,7 @@ from .fact_binding import (  # noqa: F401
     bind_facts, format_chunks, grounded_facts, to_identifier, validate_bindings,
 )
 from .pipeline import PipelineOptions, answer_question  # noqa: F401
+from .resolve_and_plan import (  # noqa: F401
+    INTENT_AND_PLAN_SYSTEM_PROMPT, resolve_and_plan,
+)
 from .validation import validate_conclusion  # noqa: F401
