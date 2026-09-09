@@ -628,13 +628,15 @@ def render_pipeline_trace(run: dict):
         st.markdown("**In** · user question + the domain's catalog manifest  ")
         if options.catalog_filter:
             st.markdown("**Work** · one LLM call reads the manifest (companies/doc_types/"
-                        "years/quarters actually in the catalog - never the catalog itself), "
-                        "ignores subject-matter words entirely, and returns both a structured "
-                        "document filter AND the evidence plan (concept, answer type, "
-                        "required facts, artifact types, verbatim content anchors) in the "
-                        "same response. An exact N1QL membership fetch then finds the "
-                        "matching document(s) from that filter - no ranking, nothing to "
-                        "guess.  ")
+                        "years/quarters actually in the catalog - never the catalog itself) "
+                        "to build a structured document filter, ignoring subject-matter words "
+                        "entirely for THAT part; the evidence plan (concept, answer type, "
+                        "required facts, artifact types, verbatim content anchors); AND "
+                        "whether the question names any known concept from a small reference "
+                        "list - all in the same response. An exact N1QL membership fetch then "
+                        "finds the matching document(s) from the filter; a matched concept's "
+                        "own official terms are looked up deterministically, never generated "
+                        "by the model, and join retrieval's forced-phrase list.  ")
             for number, event in enumerate(llms["resolve_and_plan"], 1):
                 show_llm_exchange(event, "Clarify intent"
                                   + (f" · call {number}" if len(llms["resolve_and_plan"]) > 1
@@ -653,6 +655,16 @@ def render_pipeline_trace(run: dict):
         else:
             st.warning("No document predicate · phase 1 baseline")
         st.json(plan, expanded=True)
+
+        concepts_out = (result.get("resolution_detail") or {}).get("concepts")
+        if concepts_out and concepts_out.get("matched"):
+            st.markdown("**Concepts matched**")
+            st.caption("User terms: " + ", ".join(concepts_out["subject_words"]))
+            st.caption("Matched concepts: " + ", ".join(
+                f"{m.get('user_term')} · `{m.get('id')}`" for m in concepts_out["matched"]))
+            st.caption("Expanded retrieval terms: "
+                      + ", ".join(concepts_out["expanded_terms"]))
+            st.caption("Target sections: " + ", ".join(concepts_out["target_sections"]))
 
     with st.expander("2 · Retrieve evidence — anchors + semantic search inside the document",
                      expanded=True, icon=":material/manage_search:"):

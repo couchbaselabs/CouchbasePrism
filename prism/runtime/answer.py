@@ -17,6 +17,13 @@ PLAIN_PROSE_RULE = (
     "cosmetic nitpick) - plain text has no such failure mode."
 )
 
+CURRENCY_RULE = (
+    "Every dollar figure gets its $ sign, every time it is written - \"$4.9 billion\", "
+    "never \"4.9 billion\" alone, whether the source or the computed block wrote it with "
+    "one or not. Do not drop the sign on a repeated mention of a figure already stated "
+    "once with it."
+)
+
 BASE_ANSWER_PROMPT = (
     "Answer the question using ONLY the provided excerpts. If the answer is not in "
     "them, say so clearly. Cite sources by their [number].\n\n"
@@ -24,7 +31,7 @@ BASE_ANSWER_PROMPT = (
     "source for a specific quantitative answer. When a question asks for a value, a "
     "rate, or what drove a change, check [TABLE] sources first and prefer their figures "
     "over a narrative source's paraphrase.\n\n"
-    f"{PLAIN_PROSE_RULE}"
+    f"{PLAIN_PROSE_RULE}\n\n{CURRENCY_RULE}"
 )
 
 COMPUTED_ANSWER_PROMPT = (
@@ -60,7 +67,7 @@ COMPUTED_ANSWER_PROMPT = (
     "Answer in exactly two short paragraphs: the first states the answer itself, pithily, "
     "with citations; the second explains how it was arrived at - the formula/derivation "
     "and the specific figures used, cited by [number].\n\n"
-    f"{PLAIN_PROSE_RULE}"
+    f"{PLAIN_PROSE_RULE}\n\n{CURRENCY_RULE}"
 )
 
 
