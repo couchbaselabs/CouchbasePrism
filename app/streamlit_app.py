@@ -101,33 +101,32 @@ st.html("""
 """)
 MODEL_OPTIONS = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.4", "gpt-5.5",
                  "gpt-4.1-mini", "gpt-4o-mini"]
-# Roles, not call sites - see prism.config.STAGE_ROLE. Listed in the order
-# they first appear in the pipeline trace below (steps 1/2/4/5/7/8), not
-# alphabetically or by cost. "Classification" used to sit third in an
-# unordered list, right after "Binding + answer", and looked like it ran
-# after the answer stage. It doesn't: per-question document resolution is
-# deterministic code, not an LLM call, and catalog field extraction is an
-# ingestion-time job - this role rarely appears in a single question's trace
-# at all. Descriptions below cite the trace step number so the two panels
-# read as one pipeline instead of two different orderings.
+# Roles, not call sites - see prism.config.STAGE_ROLE. Named and ordered to
+# match the 6-step field-engineer narrative in the pipeline trace below
+# (1 Clarify intent, 2 Retrieve, 3 Interpret meaning, 4 Ground and compute,
+# 5 Synthesize, 6 Evaluate), not alphabetically or by cost. "Setup model" is
+# deliberately NOT called "Clarify" despite doing catalog field extraction -
+# that name belongs to step 1's Reasoning model instead, and reusing it here
+# would suggest this role powers step 1 when it only ever runs at ingestion.
 MODEL_ROLES = [
-    ("utility", "Catalog matching", "gpt-5.4",
-     "Ingestion-time only now: extracted company, form and period across 354 "
+    ("utility", "Setup model", "gpt-5.4",
+     "Ingestion-time only: extracted company, form and period across 354 "
      "documents without a failure while building the catalog. Also covers "
      "anchor repair, off by default. Cheap and high volume."),
-    ("planner", "Planner", "gpt-5.4",
-     "Steps 1+2 (Filter, Plan - one combined call) and 4 (Govern): resolves "
-     "the document scope and the evidence plan together, and - only when "
-     "nothing approved matches - candidate calculation conventions. Proposes "
-     "structure it cannot verify."),
-    ("answer", "Bind + answer", "gpt-5.4",
-     "Steps 5 (Bind) and 7 (Answer): binds facts to rows and columns, then "
-     "writes the answer. Errors here are wrong numbers in front of a reader."),
+    ("planner", "Reasoning model", "gpt-5.4",
+     "Step 1 (Clarify intent) and step 3 (Interpret meaning, only when "
+     "nothing approved matches): resolves the document scope and the "
+     "evidence plan together, and proposes candidate calculation "
+     "conventions. Proposes structure it cannot verify."),
+    ("answer", "Grounding model", "gpt-5.4",
+     "Step 4 (Ground and compute) and step 5 (Synthesize): binds facts to "
+     "rows and columns, then writes the answer. Errors here are wrong "
+     "numbers in front of a reader."),
     ("judge", "Evaluation judge", "gpt-5.4",
-     "Step 8 (Evaluate): grades the answer against the benchmark reference. "
-     "Evaluation only, never part of an answer path. Keep it OFF the answer "
-     "model: a model grading its own output is how gpt-5.5 came to look "
-     "worse than gpt-5.4."),
+     "Step 6 (Evaluate against gold): grades the answer against the "
+     "benchmark reference. Evaluation only, never part of an answer path. "
+     "Keep it OFF the answer model: a model grading its own output is how "
+     "gpt-5.5 came to look worse than gpt-5.4."),
 ]
 PHASE_HELP = {
     "1-vector": "Textbook RAG · kNN across the whole corpus, no scoping",
@@ -598,10 +597,10 @@ def render_pipeline_trace(run: dict):
             for role in ("resolve_and_plan", "planner", "candidate", "binder",
                         "answer", "judge", "catalog")}
     # "resolve_and_plan" = runtime.resolve_and_plan() - the ONE call behind
-    # both step 1 (Filter) and step 2 (Plan) below; present whenever
-    # catalog_filter is on. "planner" only appears for the catalog_filter=
-    # False baseline phase, where resolve_and_plan() isn't called at all and
-    # plan_evidence() runs standalone instead - see pipeline.py. "catalog" =
+    # step 1 (Clarify intent) below; present whenever catalog_filter is on.
+    # "planner" only appears for the catalog_filter=False baseline phase,
+    # where resolve_and_plan() isn't called at all and plan_evidence() runs
+    # standalone instead - see pipeline.py. "catalog" =
     # fts_resolver.llm_resolve()/catalog.intent's own standalone
     # clarify_intent(), neither called by the live pipeline anymore;
     # classify_cover() also tags "catalog" but runs during Initialize, never
@@ -623,49 +622,38 @@ def render_pipeline_trace(run: dict):
         + (["BM25 lexical"] if options.bm25 else []) + ["vector kNN"]
     retrieval_mode = " + ".join(part.strip() for part in active)
 
-    with st.expander("1 · Filter — resolve the governed document scope", expanded=True,
-                     icon=":material/filter_alt:"):
+    with st.expander("1 · Clarify intent — resolve document scope and plan the evidence",
+                     expanded=True, icon=":material/filter_alt:"):
         st.markdown("**In** · user question + the domain's catalog manifest  ")
         if options.catalog_filter:
             st.markdown("**Work** · one LLM call reads the manifest (companies/doc_types/"
-                        "years/quarters actually in the catalog - never the catalog itself) "
-                        "and returns a structured filter, ignoring subject-matter words "
-                        "entirely; an exact N1QL membership fetch then finds the matching "
-                        "document(s) - no ranking, nothing to guess. The SAME call also "
-                        "produces the evidence plan shown in step 2 below - see its "
-                        "Prompt/Response tabs here for the full exchange.  ")
+                        "years/quarters actually in the catalog - never the catalog itself), "
+                        "ignores subject-matter words entirely, and returns both a structured "
+                        "document filter AND the evidence plan (concept, answer type, "
+                        "required facts, artifact types, verbatim content anchors) in the "
+                        "same response. An exact N1QL membership fetch then finds the "
+                        "matching document(s) from that filter - no ranking, nothing to "
+                        "guess.  ")
             for number, event in enumerate(llms["resolve_and_plan"], 1):
-                show_llm_exchange(event, "Resolve + plan"
+                show_llm_exchange(event, "Clarify intent"
                                   + (f" · call {number}" if len(llms["resolve_and_plan"]) > 1
                                      else ""))
         else:
             st.markdown("**Work** · catalog filtering is intentionally disabled in this "
-                        "baseline phase, so retrieval searches the corpus.  ")
-        st.markdown("**Out** · document key used as the retrieval predicate")
+                        "baseline phase, so only the evidence plan is produced and retrieval "
+                        "searches the whole corpus.  ")
+            for number, event in enumerate(llms["planner"], 1):
+                show_llm_exchange(event, "Evidence plan"
+                                  + (f" · call {number}" if len(llms["planner"]) > 1 else ""))
+        st.markdown("**Out** · selected document scope, required facts, artifact types, "
+                    "and search anchors")
         if result["resolved_doc"]:
             st.success(f"`{result['resolved_doc']}`")
         else:
             st.warning("No document predicate · phase 1 baseline")
-
-    with st.expander("2 · Plan — identify the evidence the answer requires", expanded=True,
-                     icon=":material/route:"):
-        st.markdown("**In** · question  ")
-        if options.catalog_filter:
-            st.markdown("**Work** · the same call as step 1 above also identifies the "
-                        "concept, answer type, facts, artifact types and verbatim content "
-                        "anchors - see step 1's Prompt/Response tabs for the exchange. No "
-                        "dictionary is required.  ")
-        else:
-            st.markdown("**Work** · the planner identifies the concept, answer type, facts, "
-                        "artifact types and verbatim content anchors. No dictionary is "
-                        "required.  ")
-            for number, event in enumerate(llms["planner"], 1):
-                show_llm_exchange(event, "Evidence planner"
-                                  + (f" · call {number}" if len(llms["planner"]) > 1 else ""))
-        st.markdown("**Out**")
         st.json(plan, expanded=True)
 
-    with st.expander("3 · Retrieve — anchors + semantic search inside the document",
+    with st.expander("2 · Retrieve evidence — anchors + semantic search inside the document",
                      expanded=True, icon=":material/manage_search:"):
         st.markdown("**In** · resolved document key + content anchors + question embedding  ")
         st.markdown(f"**Active strategy** · `{retrieval_mode}`  ")
@@ -692,8 +680,8 @@ def render_pipeline_trace(run: dict):
             show_sql(event, f"{number} · {sql_kind(event)}")
         st.markdown(f"**Out** · {len(result['chunks'])} evidence chunks")
 
-    with st.expander("4 · Govern — apply approved semantics or surface ambiguity",
-                     expanded=True, icon=":material/policy:"):
+    with st.expander("3 · Interpret meaning — apply approved semantics or propose "
+                     "interpretations", expanded=True, icon=":material/policy:"):
         st.markdown("**In** · planner concept + scoped dictionary  ")
         if result["dictionary_entry"]:
             st.success(f"Approved metric: `{result['dictionary_entry']}`")
@@ -706,11 +694,13 @@ def render_pipeline_trace(run: dict):
         if result["candidates"]:
             st.json(result["candidates"], expanded=True)
 
-    with st.expander("5 · Bind — connect each fact to a row, column and source",
+    with st.expander("4 · Ground and compute — bind facts, calculate, validate",
                      expanded=bool(result["bound_facts"]), icon=":material/link:"):
         st.markdown("**In** · required fact names + retrieved evidence  ")
         st.markdown("**Work** · bind each value to entity, units, period, printed row and "
-                    "source page; reject values absent from the retrieved text or mixed periods.  ")
+                    "source page, rejecting values absent from the retrieved text or mixed "
+                    "periods; then deterministic arithmetic (no LLM) against the approved "
+                    "formula or labeled candidates, and a governed verdict.  ")
         for number, event in enumerate(llms["binder"], 1):
             show_llm_exchange(event, "Fact binder"
                               + (f" · call {number}" if len(llms["binder"]) > 1 else ""))
@@ -723,10 +713,6 @@ def render_pipeline_trace(run: dict):
             } for f in result["bound_facts"]], hide_index=True, width="stretch")
         else:
             st.caption("This answer path did not require fact binding.")
-
-    with st.expander("6 · Calculate and validate — deterministic arithmetic, governed verdict",
-                     expanded=True, icon=":material/calculate:"):
-        st.markdown("**In** · grounded facts + approved formula, or labeled candidate formulas  ")
         calc = result["calculation"]
         if calc["computed"]:
             for item in calc["computed"]:
@@ -740,8 +726,8 @@ def render_pipeline_trace(run: dict):
             st.markdown("**Out · validation decision**")
             st.json(result["conclusion"], expanded=True)
 
-    with st.expander("7 · Answer — synthesize prose around grounded evidence", expanded=True,
-                     icon=":material/chat:"):
+    with st.expander("5 · Synthesize answer — concise response from grounded evidence "
+                     "and computed results", expanded=True, icon=":material/chat:"):
         st.markdown("**In** · evidence chunks + already-computed values + validation state  ")
         for number, event in enumerate(llms["answer"], 1):
             show_llm_exchange(event, "Answer synthesis"
@@ -749,7 +735,7 @@ def render_pipeline_trace(run: dict):
         st.markdown("**Out**")
         st.info(result["answer"], icon=":material/auto_awesome:")
 
-    with st.expander("8 · Evaluate — compare with the benchmark convention",
+    with st.expander("6 · Evaluate against gold — pass/fail when a gold answer is available",
                      icon=":material/fact_check:"):
         st.caption("Evaluation-only. This is not part of a production answer path.")
         for number, event in enumerate(llms["judge"], 1):
