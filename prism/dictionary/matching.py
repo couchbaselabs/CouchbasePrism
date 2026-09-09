@@ -15,9 +15,17 @@ def _normalize(s: str) -> str:
 
 
 def find_metric(dictionary: dict, concept: str):
+    """The first approved entry matching `concept`, UNLESS more than one
+    matches - multiple approved conventions can coexist for one concept
+    (dictionary.compile.build_metric_entry's formula_type), and when they
+    do, the one explicitly tagged "primary" drives computation by default.
+    An entry with no formula_type at all (every entry before this field
+    existed) defaults to "primary" - a single, unambiguous entry behaves
+    exactly as it always did."""
     target = _normalize(concept)
     if not target:
         return None
+    matches = []
     for entry in dictionary.get("entries", []):
         if (entry.get("entry_type") != "metric"
                 or entry.get("governance", {}).get("status") != "approved"):
@@ -28,8 +36,12 @@ def find_metric(dictionary: dict, concept: str):
             normalized = _normalize(name)
             if normalized and (normalized == target
                                or normalized in target or target in normalized):
-                return entry
-    return None
+                matches.append(entry)
+                break
+    if not matches:
+        return None
+    primary = [e for e in matches if e.get("formula_type", "primary") == "primary"]
+    return (primary or matches)[0]
 
 
 def find_policy(dictionary: dict, metric_id: str):

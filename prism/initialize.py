@@ -1,7 +1,7 @@
 """Initialize: the one operator action a user runs after the Couchbase AI Data
 Plane workflow finishes ingesting - no manual index setup required.
 
-Runs the same twelve steps ONCE PER CONFIGURED DOMAIN (design/domains.yaml) - one
+Runs the same thirteen steps ONCE PER CONFIGURED DOMAIN (design/domains.yaml) - one
 domain, one scope, each with its own docs/catalog search indexes. A domain
 with nothing ingested yet (iso20020, for now - architecture only, no real
 content) is not an error: its catalog rebuild step returns an empty result and
@@ -49,6 +49,7 @@ STEPS = [
     "Wait for the search index to catch up",
     "Ensure primary index — catalog",
     "Ensure primary index — dictionary",
+    "Ensure primary index — concepts",
     "Ensure primary index — docs",
     "Rebuild the catalog from ingested chunks",
     "Build the catalog metadata document",
@@ -65,7 +66,7 @@ FTS_CATALOG_INDEX_DEFINITION_PATH = config.REPO_ROOT / "design" / "fts-catalog-i
 def run(model: str = None, sectors: dict = None, on_step=None,
        on_catalog_progress=None, on_index_progress=None,
        domains: list = None) -> dict:
-    """Runs all twelve steps, in order, for each domain in `domains` (defaults to
+    """Runs all thirteen steps, in order, for each domain in `domains` (defaults to
     every domain design/domains.yaml configures - "init can do all scopes" is
     the point, not an opt-in). Stops at the first failure within a domain -
     a later step assumes every earlier one in THAT domain succeeded - but
@@ -165,15 +166,17 @@ def run(model: str = None, sectors: dict = None, on_step=None,
             step(4, lambda: couchbase_io.ensure_primary_index(
                 config.DICTIONARY_COLLECTION, scope=scope))
             step(5, lambda: couchbase_io.ensure_primary_index(
+                config.CONCEPTS_COLLECTION, scope=scope))
+            step(6, lambda: couchbase_io.ensure_primary_index(
                 config.DOCS_COLLECTION, scope=scope))
-            summary["catalog_results"] = step(6, lambda: catalog.rebuild_from_chunks(
+            summary["catalog_results"] = step(7, lambda: catalog.rebuild_from_chunks(
                 model=model, sectors=sectors, on_progress=on_catalog_progress, scope=scope))
-            summary["manifest"] = step(7, lambda: catalog.rebuild_manifest(scope=scope))
-            step(8, lambda: couchbase_io.delete_search_index(catalog_index_name, scope=scope))
-            step(9, lambda: couchbase_io.create_search_index(
+            summary["manifest"] = step(8, lambda: catalog.rebuild_manifest(scope=scope))
+            step(9, lambda: couchbase_io.delete_search_index(catalog_index_name, scope=scope))
+            step(10, lambda: couchbase_io.create_search_index(
                 catalog_index_definition, scope=scope, index_name=catalog_index_name))
-            step(10, wait_for_catalog_index)
-            summary["dictionary_removed"] = step(11, lambda: dictionary.clear(scope=scope))
+            step(11, wait_for_catalog_index)
+            summary["dictionary_removed"] = step(12, lambda: dictionary.clear(scope=scope))
         except Exception:
             # This domain's remaining steps are skipped (a later one assumes
             # an earlier one in the SAME domain succeeded), but the next
