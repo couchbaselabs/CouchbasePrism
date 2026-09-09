@@ -197,8 +197,8 @@ def tuning_panel(fusion: str) -> dict:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_catalog():
-    return catalog.load_all()
+def load_catalog(scope: str):
+    return catalog.load_all(scope=scope)
 
 
 @st.cache_data(show_spinner=False)
@@ -409,7 +409,8 @@ def trace_stats(events: list) -> dict:
 
 
 def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
-            phase: str, model: str, fusion: str = None, tuning: dict = None) -> dict:
+            phase: str, model: str, fusion: str = None, tuning: dict = None,
+            scope: str = None) -> dict:
     started = time.perf_counter()
     overrides = dict(tuning or {})
     if fusion:
@@ -418,7 +419,7 @@ def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
     with trace.capture() as events:
         result = runtime.answer_question(
             question["question"], company_catalog(catalog_docs, question["company"]),
-            dictionary_data, options=options, model=model)
+            dictionary_data, options=options, model=model, scope=scope)
         # A custom question has no FinanceBench reference to judge against -
         # question["expected_answer"] is display text for the UI, not data a
         # judge call should ever see.
@@ -858,8 +859,8 @@ def convergence_donut(passed: int, failed: int):
     )
 
 
-def render_batch(runs: list, company: str, phase: str, model: str):
-    section(f"{company} benchmark", f"{len(runs)} questions · {phase} · OpenAI {model}",
+def render_batch(runs: list, scope: str, phase: str, model: str):
+    section(f"{scope} benchmark", f"{len(runs)} questions · {phase} · OpenAI {model}",
             ":material/analytics:")
 
     passed = sum(1 for r in runs if r["verdict"]["passed"] is True)
@@ -1161,12 +1162,6 @@ def fts_sidebar():
 # --------------------------------------------------------------------- page
 
 questions = load_questions()
-catalog_docs = load_catalog()
-dictionary_data = dictionary.load()
-catalog_names = {d.get("doc_name") for d in catalog_docs}
-companies = sorted({q["company"] for q in questions if q.get("doc_name") in catalog_names})
-if not companies:
-    companies = sorted({q["company"] for q in questions})
 
 with st.sidebar:
     brand = st.container(horizontal=True, vertical_alignment="center", gap="small")
@@ -1178,13 +1173,26 @@ with st.sidebar:
 
     st.space("small")
     st.markdown("### Run configuration")
-    company = st.selectbox("Company", companies, index=companies.index("3M") if "3M" in companies else 0)
-    company_questions = [q for q in questions if q["company"] == company]
+    # "Company" doesn't apply anymore - this is a single-company installation
+    # (3M today; a future scope is still 3M, just a different corpus - see
+    # design/domains.yaml). The axis that actually varies is which domain
+    # (Couchbase scope) to operate in.
+    scope_options = sorted(config.DOMAINS)
+    scope = st.selectbox(
+        "Scope", scope_options,
+        index=scope_options.index(config.DEFAULT_SCOPE)
+        if config.DEFAULT_SCOPE in scope_options else 0)
+    catalog_docs = load_catalog(scope)
+    dictionary_data = dictionary.load(scope=scope)
+    # Every current question belongs to the default scope's corpus (ftsprism,
+    # 3M's SEC filings) - a scope with no question fixtures yet (iso20020,
+    # architecture only so far) simply has none, not an error.
+    company_questions = questions if scope == config.DEFAULT_SCOPE else []
     labels = ["All questions"] + [f"{q['id']} · {q['question'][:56]}" for q in company_questions]
     selection = st.selectbox("Question", labels)
     custom_question = st.text_area(
-        "Or ask your own question", placeholder=f"Ask anything about {company}'s filings…",
-        help="Runs the same pipeline, scoped to the company selected above. There is "
+        "Or ask your own question", placeholder=f"Ask anything about the {scope} corpus…",
+        help="Runs the same pipeline, scoped to the domain selected above. There is "
              "no gold reference for a custom question, so it is not scored — "
              "the trace and answer still show in full. Overrides the selection above "
              "when non-empty. Wrap a span in #hashes# (e.g. `#John Doe#`) to force an "
@@ -1262,21 +1270,21 @@ if custom_question.strip():
     selected_question = {
         "id": "custom", "question": custom_question.strip(), "doc_name": None,
         "expected_answer": "— (custom question, no benchmark reference)",
-        "company": company,
+        "company": "3M",
     }
 else:
     selected_question = None if selection == "All questions" else company_questions[
         labels.index(selection) - 1
     ]
 
-# Switching the company, the question, or editing the custom-question box
+# Switching the scope, the question, or editing the custom-question box
 # should clear whatever an EARLIER selection produced - a stale answer sitting
 # under a newly-chosen question reads as if it belongs to it. This runs before
 # the prompt-card so a changed selection shows only the question + Run button
 # on the very same rerun the widget change already triggers; it does not fire
 # on the rerun a button click itself causes, since the identity below is
 # unchanged from the run immediately before that click.
-selection_key = (company, selection, custom_question.strip())
+selection_key = (scope, selection, custom_question.strip())
 if st.session_state.get("last_selection_key") != selection_key:
     st.session_state.pop("showcase_runs", None)
     st.session_state["last_selection_key"] = selection_key
@@ -1441,7 +1449,7 @@ with tab_ask:
                     st.caption(f"{selected_question['id']} · expected document: "
                               f"{selected_question['doc_name']}")
             else:
-                st.markdown(f"#### Run all {len(company_questions)} {company} questions")
+                st.markdown(f"#### Run all {len(company_questions)} {scope} questions")
                 st.caption("The results dashboard will compare the gold answer and PRISM's answer.")
         with action_area:
             run_label = "Run all" if selected_question is None else "Run trace"
@@ -1457,7 +1465,7 @@ with tab_ask:
                 status.write(f"{index}/{len(targets)} · {question['id']}")
                 try:
                     runs.append(run_one(question, catalog_docs, dictionary_data, phase,
-                                        model, fusion, tuning))
+                                        model, fusion, tuning, scope=scope))
                 except Exception as exc:
                     status.update(label=f"Run stopped: {exc}", state="error", expanded=True)
                     st.exception(exc)
@@ -1465,19 +1473,19 @@ with tab_ask:
             status.update(label="Run complete", state="complete", expanded=False)
         st.session_state["showcase_runs"] = runs
         st.session_state["showcase_mode"] = "batch" if selected_question is None else "detail"
-        st.session_state["showcase_context"] = {"company": company, "phase": phase, "model": model}
+        st.session_state["showcase_context"] = {"scope": scope, "phase": phase, "model": model}
 
     runs = st.session_state.get("showcase_runs")
     if runs:
         context = st.session_state.get("showcase_context", {})
         if st.session_state.get("showcase_mode") == "batch":
-            render_batch(runs, context.get("company", company), context.get("phase", phase),
+            render_batch(runs, context.get("scope", scope), context.get("phase", phase),
                          context.get("model", model))
         else:
             render_detail(runs[0])
     else:
         with st.container(border=True, horizontal_alignment="center"):
-            st.markdown("### Choose a company and question to begin")
+            st.markdown("### Choose a scope and question to begin")
             st.caption("Run all questions for the evaluation dashboard, or select one for a full trace.")
 
 WORKBENCH_FETCH_LIMIT = 50
@@ -1491,9 +1499,17 @@ with tab_workbench:
                "the page number - without terms, Page scopes to one page. Wrap a "
                "span in #hashes# (e.g. `#John Doe#`) to force an exact-phrase match "
                "on it alongside the usual BM25 terms.")
+    # Derived from the SELECTED scope's own catalog, not the eval question
+    # corpus's company list (that list is gone now - a single-company
+    # installation has nothing to pick between there). Still a real,
+    # independent selector: it reads whatever company value the catalog
+    # itself extracted, for whichever scope is chosen in the sidebar.
+    wb_companies = sorted({d.get("company") for d in catalog_docs if d.get("company")})
     wb_cols = st.columns([2, 3, 1, 2.5])
     with wb_cols[0]:
-        wb_company = st.selectbox("Company", companies, key="wb_company")
+        wb_company = (st.selectbox("Company", wb_companies, key="wb_company")
+                     if wb_companies else
+                     st.selectbox("Company", ["(none catalogued)"], disabled=True))
     wb_doc_names = sorted({d.get("doc_name") for d in company_catalog(catalog_docs, wb_company)
                           if d.get("doc_name")})
     with wb_cols[1]:
