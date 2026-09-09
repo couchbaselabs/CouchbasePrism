@@ -18,21 +18,25 @@ from .. import config
 from ..couchbase_io import QueryError, query
 
 
-def load(path=None) -> dict:
+def load(path=None, scope: str = None) -> dict:
     """Tolerates a missing primary index specifically - an empty dictionary
     is the expected, valid state on a fresh environment where Initialize has
     never run (its own `ensure_primary_index` step exists exactly because
     this can happen), same reasoning as catalog.repository.load_all(). Any
-    other query error still raises."""
+    other query error still raises.
+
+    `path` (the file test seam) and `scope` (which domain's Couchbase
+    collection) are independent - a caller never needs both at once."""
     if path is not None:
         if not path.exists():
             return {"entries": []}
         with open(path) as f:
             return yaml.safe_load(f) or {"entries": []}
+    scope = scope or config.DEFAULT_SCOPE
     try:
         rows = query(
             "SELECT d.* FROM "
-            f"`{config.BUCKET}`.`{config.SCOPE}`.`{config.DICTIONARY_COLLECTION}` AS d"
+            f"`{config.BUCKET}`.`{scope}`.`{config.DICTIONARY_COLLECTION}` AS d"
         )
     except QueryError as e:
         if "No index available" in str(e):
@@ -41,19 +45,20 @@ def load(path=None) -> dict:
     return {"entries": rows}
 
 
-def save(dictionary: dict, path=None) -> None:
+def save(dictionary: dict, path=None, scope: str = None) -> None:
     if path is not None:
         with open(path, "w") as f:
             yaml.safe_dump(dictionary, f, sort_keys=False, width=100)
         return
+    scope = scope or config.DEFAULT_SCOPE
     # approve/forget/clear all pass the FULL entries list and expect a total
     # replace, not a merge - empty the collection first so a removed entry
     # (forget) or an emptied dictionary (clear) actually disappears rather
     # than leaving a stale document upsert can't reach because its id changed.
-    query(f"DELETE FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DICTIONARY_COLLECTION}`")
+    query(f"DELETE FROM `{config.BUCKET}`.`{scope}`.`{config.DICTIONARY_COLLECTION}`")
     for entry in dictionary.get("entries", []):
         query(
-            f"UPSERT INTO `{config.BUCKET}`.`{config.SCOPE}`.`{config.DICTIONARY_COLLECTION}` "
+            f"UPSERT INTO `{config.BUCKET}`.`{scope}`.`{config.DICTIONARY_COLLECTION}` "
             "(KEY, VALUE) VALUES ($id, $entry)",
             {"$id": entry["id"], "$entry": entry},
         )

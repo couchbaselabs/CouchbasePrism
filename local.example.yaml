@@ -1,0 +1,54 @@
+# Copy to local.yaml and fill in. local.yaml is gitignored; this file is not.
+#
+# Replaces .env: config.py loads this directly at import time (every process -
+# no more `set -a && source .env && set +a` step to remember). Keys are
+# exactly the environment variable names PRISM has always read, so nothing
+# downstream of config.py changed - only how these values get there.
+#
+# Secrets and per-deployment connection info ONLY. Domain topology (which
+# Couchbase scopes/indexes exist, which S3 folder feeds which domain) lives in
+# design/domains.yaml instead - that's PRISM's own namespace contract, checked
+# into git same as design/fts-index.json, not customer state.
+
+# --- Couchbase Capella -----------------------------------------------------
+# Bucket `prism`, and every domain's scope/collections/indexes, are fixed by
+# design/domains.yaml - not configurable here. Create the cluster with
+# exactly those names; PRISM creates each collection's primary index on
+# demand, but the bucket/scopes/collections themselves must already exist.
+COUCHBASE_CONN_STRING: couchbases://cb.xxxxx.cloud.couchbase.com
+COUCHBASE_USERNAME:
+COUCHBASE_PASSWORD:
+
+# --- Couchbase AI Data Plane ----------------------------------------------
+# Used for query embeddings, and must be the SAME model that the Unstructured
+# Data Workflow used to embed the chunks - otherwise the vectors are not
+# comparable and retrieval silently degrades.
+#
+# API_KEY is the API Key TOKEN (starts with `cbsk-`), not the API Key Id (a
+# UUID). Using the Id gives a 401 that reads like a bad endpoint.
+MODEL_END_POINT: https://xxxxx.ai.cloud.couchbase.com
+MODEL_ID:
+API_KEY:
+API_KEY_ID:
+
+# --- AWS (account-level only - per-domain folder lives in domains.yaml) ----
+# The AI Data Plane workflow derives each chunk's `xmeta-data.filename` from
+# the S3 location as {AWS_BUCKET}_{domain's aws_folder}_{name}.pdf (any "/" in
+# the folder flattened to "_"), so PRISM needs both to map a catalog doc_name
+# back to its chunks.
+#
+# No AWS access key/secret here, ever - the Setup tab's S3 upload asks for
+# those live, each time, and never writes them anywhere.
+AWS_REGION:
+AWS_BUCKET:
+
+# --- OpenAI ----------------------------------------------------------------
+# Planning, fact binding, candidate proposal, answer synthesis and the eval
+# judge. Never used for arithmetic that an approved dictionary entry governs.
+OPENAI_API_KEY:
+OPENAI_MODEL: gpt-4o-mini
+
+# --- Optional --------------------------------------------------------------
+# Where the approved dictionary lives. Defaults to ./dictionary.yaml, which is
+# gitignored: it is environment/customer state, not source.
+# PRISM_DICTIONARY: /path/to/dictionary.yaml

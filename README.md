@@ -59,8 +59,10 @@ computing and only binds facts and writes prose. That switch is what makes
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env      # fill in Capella, AI Data Plane, OpenAI, S3
-set -a && source .env && set +a
+cp local.example.yaml local.yaml   # fill in Capella, AI Data Plane, AWS, OpenAI
+                                   # prism/config.py loads it directly - no
+                                   # shell sourcing step needed
+
 
 git clone https://github.com/patronus-ai/financebench   # the test corpus
 ```

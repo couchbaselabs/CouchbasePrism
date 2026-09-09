@@ -1,4 +1,6 @@
 # Secrets — never commit
+local.yaml
+!local.example.yaml
 .env
 .env.*
 !.env.example

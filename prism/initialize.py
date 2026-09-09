@@ -1,9 +1,19 @@
 """Initialize: the one operator action a user runs after the Couchbase AI Data
 Plane workflow finishes ingesting - no manual index setup required.
 
-Destructive by design - drops and rebuilds the catalog, the dictionary, and
-the search index from scratch - but never touches `docs` or anything the
-ingestion workflow itself owns.
+Runs the same twelve steps ONCE PER CONFIGURED DOMAIN (design/domains.yaml) - one
+domain, one scope, each with its own docs/catalog search indexes. A domain
+with nothing ingested yet (iso20020, for now - architecture only, no real
+content) is not an error: its catalog rebuild step returns an empty result and
+every other step runs against an empty collection exactly the way a fresh
+environment always has. That is deliberate, not a workaround - the whole
+point of building the domain-scoping layout for real now is that a second
+domain provisions and behaves correctly with zero content in it, the same way
+the concepts collection does.
+
+Destructive by design, per domain - drops and rebuilds that domain's catalog,
+dictionary, and search indexes from scratch - but never touches `docs` or
+anything the ingestion workflow itself owns, in any domain.
 
 Ordering is deliberate, not incidental, and reverses an earlier version of
 this module's own reasoning. The catalog rebuild reads cover-page text via
@@ -39,7 +49,9 @@ STEPS = [
     "Wait for the search index to catch up",
     "Ensure primary index — catalog",
     "Ensure primary index — dictionary",
+    "Ensure primary index — docs",
     "Rebuild the catalog from ingested chunks",
+    "Build the catalog metadata document",
     "Drop the catalog search index",
     "Recreate the catalog search index",
     "Wait for the catalog search index to catch up",
@@ -51,30 +63,44 @@ FTS_CATALOG_INDEX_DEFINITION_PATH = config.REPO_ROOT / "design" / "fts-catalog-i
 
 
 def run(model: str = None, sectors: dict = None, on_step=None,
-       on_catalog_progress=None, on_index_progress=None) -> dict:
-    """Runs all ten steps in order, stopping at the first failure - a later
-    step assumes every earlier one succeeded, and continuing past a real
-    failure (a catalog rebuild reading from a half-built index, a dictionary
-    clear after something upstream silently didn't finish) is worse than
-    stopping loudly.
+       on_catalog_progress=None, on_index_progress=None,
+       domains: list = None) -> dict:
+    """Runs all twelve steps, in order, for each domain in `domains` (defaults to
+    every domain design/domains.yaml configures - "init can do all scopes" is
+    the point, not an opt-in). Stops at the first failure within a domain -
+    a later step assumes every earlier one in THAT domain succeeded - but
+    still attempts every remaining domain, since one domain's failure says
+    nothing about another's independent collections and indexes.
 
-    The catalog's own search index (ftsPrismCatalog - backs
-    catalog.resolve_for_question_at_scale, the FTS-shortlist-then-LLM-pick
-    resolution path) is recreated AFTER the catalog rebuild, not before -
-    the opposite order from the docs index. Each catalog entry's
-    search_label (see extraction.py's _search_label) is computed as part of
-    the rebuild itself, so recreating this index earlier would just index
-    stale or absent labels from before the rebuild ran.
+    Each domain's own search index (`fts{Domain}Docs`) is created from the
+    SAME design/fts-index.json template, with `create_search_index`
+    rewriting the index name and scope binding per domain - one definition,
+    N differently-named indexes, same reasoning as the catalog index below.
 
-    on_step(index_1_based, total, name, status, detail=None) fires before
-    ("running") and after ("done"/"error") each step, so a caller can render
-    progress without depending on this module's internals.
+    The catalog's own search index (`fts{Domain}Catalog` - backs
+    catalog.resolve_for_question_at_scale, fts_resolver.py's FTS-shortlist-
+    then-LLM-pick resolution path, no longer the live one but still tested)
+    is recreated AFTER the catalog rebuild, not before - the opposite order
+    from the docs index. Each catalog entry's search_label (see
+    extraction.py's _search_label) is computed as part of the rebuild
+    itself, so recreating this index earlier would just index stale or
+    absent labels from before the rebuild ran. The manifest step right after
+    the catalog rebuild has no such dependency on this index at all - it is
+    read by a direct point fetch (USE KEYS), never searched.
+
+    on_step(i_1_based, total, name, status, detail=None) fires before
+    ("running") and after ("done"/"error") each step, where `total` is the
+    step count across ALL domains (len(domains) * len(STEPS)) and `name` is
+    "{step} — {domain}" - the same STEPS prefixes a caller may already match
+    on (e.g. `name.startswith("Rebuild the catalog")`) still hold, since the
+    domain is appended, not prepended.
     on_catalog_progress passes straight through to catalog.rebuild_from_chunks
     for its own per-document progress; on_index_progress passes through to
     couchbase_io.wait_for_search_index for BOTH reindex-catch-up steps.
 
-    Returns {"steps": [{"name", "ok", "error"?}, ...], "catalog_results": [...],
-    "dictionary_removed": [...]}.
+    Returns {"domains": {domain: {"steps": [...], "catalog_results": [...],
+    "manifest": {...}, "dictionary_removed": [...]}}} - one entry per domain
+    attempted, in the same order `domains` was given.
     """
     if not FTS_INDEX_DEFINITION_PATH.exists():
         raise FileNotFoundError(
@@ -85,51 +111,75 @@ def run(model: str = None, sectors: dict = None, on_step=None,
             f"{FTS_CATALOG_INDEX_DEFINITION_PATH} is missing - Initialize needs "
             "the catalog search index definition on disk to recreate it from.")
     definition = json.loads(FTS_INDEX_DEFINITION_PATH.read_text())
-    index_name = definition["name"]
     catalog_index_definition = json.loads(FTS_CATALOG_INDEX_DEFINITION_PATH.read_text())
-    catalog_index_name = catalog_index_definition["name"]
 
-    summary = {"steps": []}
+    domains = list(domains or config.DOMAINS)
+    total_steps = len(STEPS) * len(domains)
+    overall = {"domains": {}}
 
-    def step(i, fn):
-        if on_step:
-            on_step(i + 1, len(STEPS), STEPS[i], "running")
+    for d, scope in enumerate(domains):
+        summary = {"steps": []}
+        index_name = config.fts_docs_index_name(scope)
+        catalog_index_name = config.fts_catalog_index_name(scope)
+
+        def step(i, fn, _d=d, _scope=scope, _summary=summary):
+            global_i = _d * len(STEPS) + i
+            name = f"{STEPS[i]} — {_scope}"
+            if on_step:
+                on_step(global_i + 1, total_steps, name, "running")
+            try:
+                result = fn()
+                _summary["steps"].append({"name": STEPS[i], "ok": True})
+                if on_step:
+                    on_step(global_i + 1, total_steps, name, "done")
+                return result
+            except Exception as e:
+                _summary["steps"].append({"name": STEPS[i], "ok": False, "error": str(e)})
+                if on_step:
+                    on_step(global_i + 1, total_steps, name, "error", str(e))
+                raise
+
+        def wait_for_index(_scope=scope, _index_name=index_name):
+            target = couchbase_io.query(
+                f"SELECT RAW COUNT(*) FROM `{config.BUCKET}`.`{_scope}`."
+                f"`{config.DOCS_COLLECTION}`")[0]
+            return couchbase_io.wait_for_search_index(
+                _index_name, target_count=target, on_progress=on_index_progress,
+                scope=_scope)
+
+        def wait_for_catalog_index(_scope=scope, _catalog_index_name=catalog_index_name):
+            target = couchbase_io.query(
+                f"SELECT RAW COUNT(*) FROM `{config.BUCKET}`.`{_scope}`."
+                f"`{config.CATALOG_COLLECTION}`")[0]
+            return couchbase_io.wait_for_search_index(
+                _catalog_index_name, target_count=target, on_progress=on_index_progress,
+                scope=_scope)
+
         try:
-            result = fn()
-            summary["steps"].append({"name": STEPS[i], "ok": True})
-            if on_step:
-                on_step(i + 1, len(STEPS), STEPS[i], "done")
-            return result
-        except Exception as e:
-            summary["steps"].append({"name": STEPS[i], "ok": False, "error": str(e)})
-            if on_step:
-                on_step(i + 1, len(STEPS), STEPS[i], "error", str(e))
-            raise
+            step(0, lambda: couchbase_io.delete_search_index(index_name, scope=scope))
+            step(1, lambda: couchbase_io.create_search_index(
+                definition, scope=scope, index_name=index_name))
+            step(2, wait_for_index)
+            step(3, lambda: couchbase_io.ensure_primary_index(
+                config.CATALOG_COLLECTION, scope=scope))
+            step(4, lambda: couchbase_io.ensure_primary_index(
+                config.DICTIONARY_COLLECTION, scope=scope))
+            step(5, lambda: couchbase_io.ensure_primary_index(
+                config.DOCS_COLLECTION, scope=scope))
+            summary["catalog_results"] = step(6, lambda: catalog.rebuild_from_chunks(
+                model=model, sectors=sectors, on_progress=on_catalog_progress, scope=scope))
+            summary["manifest"] = step(7, lambda: catalog.rebuild_manifest(scope=scope))
+            step(8, lambda: couchbase_io.delete_search_index(catalog_index_name, scope=scope))
+            step(9, lambda: couchbase_io.create_search_index(
+                catalog_index_definition, scope=scope, index_name=catalog_index_name))
+            step(10, wait_for_catalog_index)
+            summary["dictionary_removed"] = step(11, lambda: dictionary.clear(scope=scope))
+        except Exception:
+            # This domain's remaining steps are skipped (a later one assumes
+            # an earlier one in the SAME domain succeeded), but the next
+            # domain still runs - see the module docstring.
+            pass
 
-    def wait_for_index():
-        target = couchbase_io.query(
-            f"SELECT RAW COUNT(*) FROM `{config.BUCKET}`.`{config.SCOPE}`."
-            f"`{config.DOCS_COLLECTION}`")[0]
-        return couchbase_io.wait_for_search_index(
-            index_name, target_count=target, on_progress=on_index_progress)
+        overall["domains"][scope] = summary
 
-    def wait_for_catalog_index():
-        target = couchbase_io.query(
-            f"SELECT RAW COUNT(*) FROM `{config.BUCKET}`.`{config.SCOPE}`."
-            f"`{config.CATALOG_COLLECTION}`")[0]
-        return couchbase_io.wait_for_search_index(
-            catalog_index_name, target_count=target, on_progress=on_index_progress)
-
-    step(0, lambda: couchbase_io.delete_search_index(index_name))
-    step(1, lambda: couchbase_io.create_search_index(definition))
-    step(2, wait_for_index)
-    step(3, lambda: couchbase_io.ensure_primary_index(config.CATALOG_COLLECTION))
-    step(4, lambda: couchbase_io.ensure_primary_index(config.DICTIONARY_COLLECTION))
-    summary["catalog_results"] = step(5, lambda: catalog.rebuild_from_chunks(
-        model=model, sectors=sectors, on_progress=on_catalog_progress))
-    step(6, lambda: couchbase_io.delete_search_index(catalog_index_name))
-    step(7, lambda: couchbase_io.create_search_index(catalog_index_definition))
-    step(8, wait_for_catalog_index)
-    summary["dictionary_removed"] = step(9, dictionary.clear)
-
-    return summary
+    return overall

@@ -68,9 +68,19 @@ class PipelineOptions:
 
 
 def answer_question(question: str, catalog_docs: list, dictionary_data: dict = None,
-                    options: PipelineOptions = None, model: str = None) -> dict:
+                    options: PipelineOptions = None, model: str = None,
+                    scope: str = None) -> dict:
     """One question, end to end. Returns every intermediate stage so the demo
-    can show the pipeline and the debugger can diagnose it."""
+    can show the pipeline and the debugger can diagnose it.
+
+    `scope` picks which domain's manifest/catalog resolution runs against -
+    defaults to config.DEFAULT_SCOPE. Retrieval itself (`retrieval.retrieve`,
+    further down) is not yet threaded through an explicit scope - it still
+    reads config.SCOPE, the transitional default - since nothing calls this
+    with a second domain's chunks to retrieve against today. Resolution is
+    threaded for real because the Intent Clarifier's manifest read
+    genuinely needs to know which domain's manifest to fetch.
+    """
     options = options or PipelineOptions()
     dictionary_data = (dictionary_data if dictionary_data is not None
                        else dictionary.load())
@@ -82,29 +92,46 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
     # leg, further down; it is a no-op for every other retrieval path.
     question, forced_phrases = retrieval.extract_phrase_terms(question)
 
-    # FTS shortlist + a cheap LLM pick (catalog/fts_resolver.py) - the ONLY
-    # resolution path, not a choice. resolver.py's deterministic regex path
-    # (still in the codebase, still tested - form_of() in particular is a
-    # real dependency of extraction.py's search_label building) found real,
-    # matching bugs three separate times in one day of real questions, each
-    # a mechanism built for one phrasing failing on another it was never
-    # meant to handle. A second knob here to pick between them was tried and
-    # explicitly rejected: "too many knobs leads to confusion" - settle on
-    # one, and this is the one that generalizes past dates (concepts, once
-    # PRISM covers a domain where dates aren't the only disambiguator) and
-    # scales past what loading the whole catalog into Python can.
+    # Intent Clarifier (catalog/intent.py) - the question plus the domain's
+    # manifest (one small aggregate document, not the catalog itself) goes to
+    # a cheap model that returns a STRUCTURED filter (companies/doc_types/
+    # years), then an exact N1QL membership fetch on those values - the ONLY
+    # resolution path, not a choice. Replaced fts_resolver.py's FTS-shortlist-
+    # then-LLM-pick: once the filter is structured and drawn from the
+    # manifest's own known vocabulary, there is no free text left to rank,
+    # only to fetch. fts_resolver.py (and resolver.py's deterministic path
+    # before it) stay in the codebase, still tested, not called - the same
+    # "settle on one, not a toggle" reasoning each replacement has followed.
+    #
+    # The Clarifier can return a document SET (a company-wide, multi-year
+    # question resolves to more than one document by design) - only one is
+    # used below. That is a known, real gap, not papered over: the
+    # multi-document retrieve+bind+compute+synthesize pipeline this exists to
+    # feed has not been built yet.
+    #
+    # The one used is the MOST RECENT year (then quarter) in the set, not
+    # documents[0] - verified live this was not cosmetic: resolve_documents()'s
+    # N1QL fetch carries no ORDER BY, so documents[0] was whichever the server
+    # happened to return first. That silently answered a "2023 vs FY2022"
+    # question from the 2022 10-K's own figures (19.1% margin instead of the
+    # correct -27.9%) and, separately, a "third quarter of 2022" question from
+    # Q1's 10-Q instead of Q3's - both confident, cited, WRONG answers, not a
+    # decline. This is a defensive floor, not a fix for either real gap above:
+    # with only ever one document reaching retrieval, latest-year-then-latest-
+    # quarter is the least-wrong single guess when the Clarifier's own
+    # consolidation/quarter guidelines (see intent.py's prompt) do not collapse
+    # the set to one document on their own.
     resolution_detail = None
     if not options.catalog_filter:
         doc_name = None
     else:
-        # search_candidates()/llm_resolve() never load catalog_docs at all -
-        # the whole point is not needing the full catalog in Python to
-        # resolve one question. catalog_docs is still used below to look up
-        # the picked entry's other fields (gics_sector, etc.) - a targeted,
-        # single-document lookup, not the scan this path exists to avoid.
-        resolution_detail = catalog.resolve_for_question_at_scale(question, model=model)
-        picked = resolution_detail.get("selected_documents") or []
-        doc_name = picked[0]["doc_name"] if picked else None
+        resolution_detail = catalog.resolve_intent(question, scope=scope, model=model)
+        documents = sorted(
+            resolution_detail.get("documents") or [],
+            key=lambda d: (d.get("doc_period") or 0,
+                          catalog.quarter_of(d.get("period_end_date_iso")) or 0),
+            reverse=True)
+        doc_name = documents[0]["doc_name"] if documents else None
     # Built from the catalog, so the prompt stays generic and the corpus
     # supplies the specifics.
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)

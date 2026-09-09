@@ -1399,16 +1399,26 @@ with tab_setup:
                     st.session_state["initialize_failures"] = []
                     st.exception(exc)
                     st.stop()
-                ok = sum(1 for r in summary["catalog_results"] if r["ok"])
-                failed = [r for r in summary["catalog_results"] if not r["ok"]]
+                # One entry per configured domain (design/domains.yaml) - a
+                # domain with nothing ingested yet (iso20020, for now)
+                # contributes 0/0, not an error, same as an empty corpus
+                # always has.
+                per_domain = summary["domains"]
+                catalog_results = [r for d in per_domain.values() for r in d["catalog_results"]]
+                dictionary_removed = [e for d in per_domain.values() for e in d["dictionary_removed"]]
+                ok = sum(1 for r in catalog_results if r["ok"])
+                failed = [r for r in catalog_results if not r["ok"]]
+                breakdown = ", ".join(
+                    f"{scope} {sum(1 for r in d['catalog_results'] if r['ok'])}/"
+                    f"{len(d['catalog_results'])}" for scope, d in per_domain.items())
                 status.update(
-                    label=f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
-                          f"dictionary cleared ({len(summary['dictionary_removed'])} "
+                    label=f"Initialized — catalog {ok}/{len(catalog_results)} ({breakdown}), "
+                          f"dictionary cleared ({len(dictionary_removed)} "
                           "entrie(s)), search index rebuilt",
                     state="complete", expanded=False)
             # st.toast survives the st.rerun() below; st.success/st.error here
             # would not - same reasoning as the earlier catalog-only button.
-            st.toast(f"Initialized — catalog {ok}/{len(summary['catalog_results'])}, "
+            st.toast(f"Initialized — catalog {ok}/{len(catalog_results)}, "
                     "dictionary and search index rebuilt.",
                     icon=":material/check_circle:" if not failed else ":material/warning:")
             st.session_state["initialize_failures"] = failed

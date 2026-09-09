@@ -150,11 +150,13 @@ def initialize(args):
     search index from design/fts-index.json - the one thing a user runs after
     the AI Data Plane workflow finishes, with no separate index setup. Never
     touches `docs` or anything the workflow itself owns."""
-    print("Initialize will:", file=sys.stderr)
+    domains = list(config.DOMAINS)
+    print(f"Initialize will, for each domain ({', '.join(domains)}):", file=sys.stderr)
     for name in prism_initialize.STEPS:
         print(f"  - {name}", file=sys.stderr)
     if not _confirm("This empties the catalog and dictionary and rebuilds the "
-                    "search index. docs/chunks are untouched. Proceed?", args.yes):
+                    "search index, in every configured domain. docs/chunks are "
+                    "untouched. Proceed?", args.yes):
         sys.exit("aborted")
 
     corpus = load_corpus(args.corpus)
@@ -178,10 +180,12 @@ def initialize(args):
     summary = prism_initialize.run(model=args.model, sectors=sectors, on_step=on_step,
                                    on_catalog_progress=on_catalog_progress,
                                    on_index_progress=on_index_progress)
-    ok = sum(1 for r in summary["catalog_results"] if r["ok"])
-    print(f"\ncatalog: {ok}/{len(summary['catalog_results'])} document(s)", file=sys.stderr)
-    print(f"dictionary: cleared {len(summary['dictionary_removed'])} entrie(s)",
-          file=sys.stderr)
+    for scope, result in summary["domains"].items():
+        ok = sum(1 for r in result["catalog_results"] if r["ok"])
+        print(f"\n[{scope}] catalog: {ok}/{len(result['catalog_results'])} document(s)",
+              file=sys.stderr)
+        print(f"[{scope}] dictionary: cleared {len(result['dictionary_removed'])} entrie(s)",
+              file=sys.stderr)
     print("done", file=sys.stderr)
 
 

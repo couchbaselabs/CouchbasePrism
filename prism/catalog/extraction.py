@@ -78,7 +78,8 @@ def _chunk_sort_key(chunk: dict) -> tuple:
     return (chunk.get("page") or 0, chunk.get("type") == "table", index)
 
 
-def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES) -> str:
+def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES,
+                           scope: str = None) -> str:
     """Same output shape as cover_text() - "--- page N ---" markers, one block
     per page - but sourced from chunks the AI Data Plane workflow already
     ingested rather than opening the PDF again. No PDF file access needed.
@@ -99,19 +100,20 @@ def cover_text_from_chunks(doc_name: str, pages: int = COVER_PAGES) -> str:
     predicate - the result set here is small enough (a few pages) that this
     costs nothing.
     """
+    scope = scope or config.DEFAULT_SCOPE
     rows = query(
         f"""
         SELECT d.`meta-data`.`page-number` AS page,
                d.`meta-data`.type AS type,
                d.`element-id` AS element_id,
                d.`text-to-embed` AS text
-        FROM `{config.BUCKET}`.`{config.SCOPE}`.`{config.DOCS_COLLECTION}` AS d
+        FROM `{config.BUCKET}`.`{scope}`.`{config.DOCS_COLLECTION}` AS d
         WHERE SEARCH(d, {{"query": {{"conjuncts": [
           {{"field": "xmeta-data.filename", "match": $filename}},
           {{"field": "meta-data.page-number", "max": $pages, "inclusive_max": true}}
-        ]}}}}, {{"index": "{config.FTS_DOCS_INDEX}"}})
+        ]}}}}, {{"index": "{config.fts_docs_index(scope)}"}})
         """,
-        {"$filename": config.source_filename(doc_name), "$pages": pages},
+        {"$filename": config.source_filename(doc_name, scope=scope), "$pages": pages},
     )
     rows = [r for r in rows if r.get("type") != "footnote"]
     rows.sort(key=_chunk_sort_key)
@@ -186,6 +188,22 @@ def period_from_doc_name(doc_name: str):
     return int(match.group(1)) if match else None
 
 
+_NAME_FORM = re.compile(r"_(10K|10Q|DEF14A|8K)(?:_|$)")
+_NAME_FORM_CANONICAL = {"10K": "10-K", "10Q": "10-Q", "DEF14A": "DEF 14A", "8K": "8-K"}
+
+
+def doc_type_from_doc_name(doc_name: str):
+    """A doc_type for documents whose cover page never states one within the
+    classifier's page window - some of this corpus's "...earnings" 8-Ks never
+    print "Form 8-K" (or any recognizable form phrase) in their first 5
+    pages at all, so classify_cover comes back null rather than guessing.
+    The document name already carries the form - this corpus's own naming
+    convention - so it is used as a fallback and recorded as such, same
+    reasoning as period_from_doc_name above."""
+    match = _NAME_FORM.search(doc_name or "")
+    return _NAME_FORM_CANONICAL.get(match.group(1)) if match else None
+
+
 def fiscal_year(iso_date: str):
     """The fiscal year a period-end date belongs to.
 
@@ -205,6 +223,18 @@ def fiscal_year(iso_date: str):
     return year - 1 if month == 1 and day <= 7 else year
 
 
+def quarter_of(period_end_date_iso: str):
+    """Which fiscal quarter a period-end date falls in, from its month alone -
+    arithmetic, not a guess, same reasoning as fiscal_year() above. Only
+    meaningful for a 10-Q's own period_end_date_iso; a 10-K's covers the
+    whole year, not one quarter, so callers that care about the distinction
+    should check doc_type/form_of() first (see _search_label and
+    catalog.intent.resolve_documents, both of which do)."""
+    if not period_end_date_iso or len(period_end_date_iso) < 7:
+        return None
+    return _QUARTER_OF_MONTH.get(int(period_end_date_iso[5:7]))
+
+
 def _search_label(company: str, doc_type: str, doc_period, period_end_date_iso: str) -> str:
     """A rich, natural-language description of a catalog entry - built
     entirely from fields already known deterministically (no new
@@ -216,15 +246,11 @@ def _search_label(company: str, doc_type: str, doc_period, period_end_date_iso: 
     mechanism built for one phrasing failing on a different one. A BM25
     match against natural text sidesteps the whole class of gap: it doesn't
     care which words the question used, only whether they overlap with
-    words already in this label.
-
-    Quarter is derived from period_end_date_iso's month - safe, since which
-    calendar quarter a date falls in is arithmetic, not something to guess."""
+    words already in this label."""
     form = form_of(doc_type) or (doc_type or "")
     bits = [company or "", form]
-    if form == "10-Q" and period_end_date_iso and len(period_end_date_iso) >= 7:
-        month = int(period_end_date_iso[5:7])
-        quarter = _QUARTER_OF_MONTH.get(month)
+    if form == "10-Q":
+        quarter = quarter_of(period_end_date_iso)
         if quarter:
             bits.append(f"{_QUARTER_WORDS[quarter]} quarter quarterly report")
     elif form == "10-K":
@@ -263,12 +289,24 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
     """
     period = extraction.get("period_end_date", {})
     raw = period.get("value")
+    doc_type = extraction.get("doc_type") or {}
+    if not doc_type.get("value"):
+        # The classifier declined rather than guess - correct behaviour, but
+        # this corpus's doc_name already carries the form when the cover page
+        # doesn't state one clearly enough. source="doc_name" (not
+        # "pdf_text") keeps this honestly distinct from an actual cover-page
+        # read - the manifest and search_label both read doc_type.value the
+        # same way either way, but a reader of this envelope can still tell
+        # which one they got.
+        fallback = doc_type_from_doc_name(doc_name)
+        if fallback:
+            doc_type = {**doc_type, "value": fallback, "source": "doc_name"}
     document = {
         "doc_id": doc_name,
         "doc_name": doc_name,
         "type": "catalog_document",
         "company": extraction.get("company"),
-        "doc_type": extraction.get("doc_type"),
+        "doc_type": doc_type,
         "period_end_date": period,
         "period_end_date_iso": to_iso_date(raw),
         "doc_period": (fiscal_year(to_iso_date(raw))
@@ -297,11 +335,12 @@ def build_from_pdf(pdf_path: str, doc_name: str, model: str = None,
 
 
 def build_from_chunks(doc_name: str, model: str = None, gics_sector: str = None,
-                      pages: int = COVER_PAGES) -> dict:
+                      pages: int = COVER_PAGES, scope: str = None) -> dict:
     """Same classification, sourced from already-ingested chunks instead of
     the PDF. This is the path that needs no local PDF file at all."""
     return build_document(
-        doc_name, classify_cover(cover_text_from_chunks(doc_name, pages), model=model),
+        doc_name,
+        classify_cover(cover_text_from_chunks(doc_name, pages, scope=scope), model=model),
         gics_sector=gics_sector,
         extractor="chunks-sort+closed-set-classification",
-        source_filename=config.source_filename(doc_name))
+        source_filename=config.source_filename(doc_name, scope=scope))

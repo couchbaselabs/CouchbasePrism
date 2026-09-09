@@ -26,23 +26,34 @@ Two stages, not one call:
      genuinely needs more than one filing, are both real outcomes this
      reports rather than papers over by forcing a single confident pick.
 
-This is THE resolution path pipeline.answer_question() uses - not one of a
-choice. It briefly existed as an opt-in alongside resolver.py's deterministic
-path specifically so the two could be compared before committing; once
-compared (verified live against all three bugs above, plus a genuine
-out-of-corpus question that correctly declined rather than guessing), the
-choice itself became the thing worth removing: "too many knobs leads to
-confusion" - one resolution mechanism, not a runtime setting nobody but an
-engineer would know how to pick between. resolver.py's functions stay in the
-codebase (still tested, form_of() is a real dependency here too via
-extraction.py's search_label building) but are no longer called by the live
-pipeline.
+This WAS the resolution path pipeline.answer_question() used, briefly - it
+existed as an opt-in alongside resolver.py's deterministic path specifically
+so the two could be compared before committing; once compared (verified live
+against all three bugs above, plus a genuine out-of-corpus question that
+correctly declined rather than guessing), the choice itself became the thing
+worth removing: "too many knobs leads to confusion" - one resolution
+mechanism, not a runtime setting nobody but an engineer would know how to
+pick between.
 
-Also generalizes past what regex ever could once PRISM covers a domain where
-dates aren't the primary disambiguator - a healthcare or research-paper
-catalog might resolve by cohort, trial phase, or subject matter instead,
-which is exactly the kind of signal an LLM reads naturally and a
-period-focused regex has no notion of at all.
+Superseded in turn by catalog/intent.py (the Intent Clarifier), for a reason
+specific to this corpus rather than a rejection of the approach here: this
+module's shortlist matches company/aliases/sector/search_label against the
+QUESTION'S OWN free text, which means a subject-matter word in the question
+("PFAS", "a product recall") still perturbs the shortlist even though the
+catalog has no subject-matter field to match it against - the shortlist just
+silently downranks toward whatever else in the text happens to overlap.
+intent.py's manifest-based filter never sees the question's free text at
+all; it asks a model to select only from values the catalog actually has,
+which cannot be pulled off course by a word the catalog was never going to
+answer. Both modules' functions stay in the codebase (still tested, form_of()
+is a real dependency of both this module's and intent.py's normalization) but
+only intent.py is called by the live pipeline now.
+
+Still generalizes past what regex ever could, same as when this replaced
+resolver.py: search_candidates()/llm_resolve() scale past loading the whole
+catalog into Python, which intent.py's manifest read does not need to prove
+again - a manifest is bounded by DISTINCT values, not document count, from
+the start.
 """
 from .. import config, llm
 from ..couchbase_io import query

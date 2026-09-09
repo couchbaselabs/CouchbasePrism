@@ -21,7 +21,14 @@ Two subject signals, because neither covers the corpus alone:
 import re
 
 # Canonical SEC form -> the shapes a cover page actually prints it as.
-_FORMS = {"10K": "10-K", "10Q": "10-Q", "8K": "8-K", "20F": "20-F", "40F": "40-F"}
+# "14A" (not "DEF14A") deliberately - it matches both "DEF 14A" and "SCHEDULE
+# 14A", which this corpus's own cover pages print interchangeably for the
+# same proxy statement across different years. Missing this key was a real
+# gap: the catalog's manifest rollup (initialize.py) surfaced "DEF 14A" and
+# "SCHEDULE 14A" as two distinct doc_types for one form, exactly the
+# comparison bug this function exists to prevent.
+_FORMS = {"10K": "10-K", "10Q": "10-Q", "8K": "8-K", "14A": "DEF 14A",
+         "20F": "20-F", "40F": "40-F"}
 
 
 def form_of(doc_type) -> str:

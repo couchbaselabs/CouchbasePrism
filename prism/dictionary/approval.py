@@ -12,12 +12,13 @@ from .repository import load, save
 
 
 def approve(concept: str, formula: str, healthy_at_or_above=None,
-            domain: str = "finance", document_types=None, path=None) -> dict:
+            domain: str = "finance", document_types=None, path=None,
+            scope: str = None) -> dict:
     """Writes (or replaces) a metric entry and, optionally, its interpretation
     policy. Scoped deliberately: a document that breaks the scoping assumption
     (GAAP vs IFRS, an unusually structured balance sheet) should re-trigger
     ambiguity rather than silently inherit the wrong entry."""
-    dictionary = load(path)
+    dictionary = load(path, scope=scope)
     slug = re.sub(r"[^a-z0-9]+", "_", concept.lower()).strip("_")
     metric_id = f"{domain}.{slug}"
     dictionary["entries"] = [
@@ -42,16 +43,16 @@ def approve(concept: str, formula: str, healthy_at_or_above=None,
             "policy": {"healthy_at_or_above": float(healthy_at_or_above)},
             "governance": {"status": "approved", "source": "human_review", "version": 1},
         })
-    save(dictionary, path)
+    save(dictionary, path, scope=scope)
     return dictionary
 
 
-def forget(concept: str, path=None) -> list:
+def forget(concept: str, path=None, scope: str = None) -> list:
     """Remove one concept's metric entry and its policy, returning the ids
     dropped. The inverse of `approve` - useful for re-demonstrating the
     ungoverned path for a single concept without discarding everything else
     that has been reviewed."""
-    dictionary = load(path)
+    dictionary = load(path, scope=scope)
     entry = find_metric(dictionary, concept)
     if entry is None:
         return []
@@ -61,14 +62,14 @@ def forget(concept: str, path=None) -> list:
     dictionary["entries"] = [e for e in dictionary["entries"]
                              if e.get("id") not in removed
                              and e.get("applies_to") != metric_id]
-    save(dictionary, path)
+    save(dictionary, path, scope=scope)
     return removed
 
 
-def clear(path=None) -> list:
+def clear(path=None, scope: str = None) -> list:
     """Empty the dictionary. PRISM operates fine like this - that is the whole
     claim - so this is how the cold half of the two-pass demo is set up."""
-    dictionary = load(path)
+    dictionary = load(path, scope=scope)
     removed = [e.get("id") for e in dictionary.get("entries", [])]
-    save({"entries": []}, path)
+    save({"entries": []}, path, scope=scope)
     return removed

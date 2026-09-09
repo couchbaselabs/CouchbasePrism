@@ -1,48 +1,138 @@
 """Environment-derived configuration. Nothing here is corpus-specific."""
 import os
 import pathlib
+from dataclasses import dataclass
+
+import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _load_local_secrets() -> None:
+    """local.yaml (gitignored) replaces .env - loaded here, once, at import,
+    rather than relying on a shell `set -a && source .env && set +a` step
+    every process had to remember before this. Populates os.environ under the
+    SAME names .env always used, so couchbase_host()/couchbase_auth()/
+    EMBED_ENDPOINT/etc. below don't change at all - only how the values get
+    there does. setdefault(), not direct assignment: a value already in the
+    real environment (CI, a container) wins over the file, same precedence
+    any dotenv-style loader uses."""
+    path = REPO_ROOT / "local.yaml"
+    if not path.exists():
+        return
+    for key, value in (yaml.safe_load(path.read_text()) or {}).items():
+        if value is not None:
+            os.environ.setdefault(key, str(value))
+
+
+_load_local_secrets()
 
 # --- Couchbase -------------------------------------------------------------
 # Fixed, not environment-configurable, by deliberate choice - this is PRISM's
 # own namespace contract, not a per-deployment setting. A customer's Couchbase
 # AI Data Plane workflow has to be pointed at exactly these names for
 # Initialize (and everything downstream of it) to find what it ingested;
-# letting BUCKET/SCOPE vary per environment just adds a way for the app and
-# the workflow to silently disagree about where the data lives. Only the
+# letting these vary per environment just adds a way for the app and the
+# workflow to silently disagree about where the data lives. Only the
 # connection string and credentials (couchbase_host/couchbase_auth, below)
 # are meant to vary per deployment.
-BUCKET = "acme"
-SCOPE = "prism"
+BUCKET = "prism"
 CATALOG_COLLECTION = "catalog"
 DOCS_COLLECTION = "docs"
 DICTIONARY_COLLECTION = "dictionary"
+CONCEPTS_COLLECTION = "concepts"  # "tribal knowledge" - entity/topic meaning,
+# distinct from dictionary (which governs formulas/interpretation policy).
+# Empty today, deliberately - the collection exists for real in every domain
+# Initialize provisions, ahead of having real content to put in it.
+
+DOMAINS_PATH = REPO_ROOT / "design" / "domains.yaml"
+
+
+@dataclass(frozen=True)
+class Domain:
+    scope: str          # the Couchbase scope this domain lives in - one
+                        # domain, one scope, by design (design/domains.yaml)
+    aws_folder: str      # ordinary AWS notation, e.g. "Prism/3M" - not
+                        # pre-flattened; config.aws_folder() does that
+    docs_index: str      # bare FTS index name over `docs` in this scope
+    catalog_index: str   # bare FTS index name over `catalog` in this scope
+
+
+def _load_domains() -> tuple:
+    """design/domains.yaml is PRISM's own namespace contract, same category
+    as design/fts-index.json - committed, not customer state, since the
+    domain topology (which scopes/indexes exist) IS the reference
+    architecture this whole project is demonstrating, not a per-deployment
+    secret. Loaded once at import; missing or empty fails loudly rather than
+    quietly answering questions against a scope nothing configured."""
+    if not DOMAINS_PATH.exists():
+        raise FileNotFoundError(
+            f"{DOMAINS_PATH} is missing - PRISM needs at least one domain "
+            "configured to know which Couchbase scope(s) to use.")
+    raw = yaml.safe_load(DOMAINS_PATH.read_text()) or {}
+    domains = {name: Domain(scope=name, **fields)
+              for name, fields in (raw.get("domains") or {}).items()}
+    if not domains:
+        raise ValueError(f"{DOMAINS_PATH} defines no domains")
+    default = raw.get("default") or next(iter(domains))
+    if default not in domains:
+        raise ValueError(f"{DOMAINS_PATH}: default {default!r} is not one of "
+                         f"the configured domains {sorted(domains)}")
+    return domains, default
+
+
+DOMAINS, DEFAULT_SCOPE = _load_domains()
+# Transitional alias, not a fresh constant: every call site not yet threaded
+# through an explicit `scope` argument (retrieval/*, catalog/fts_resolver.py,
+# the Streamlit app) still reads config.SCOPE and gets the default domain,
+# same behaviour as before domains existed. Call sites that DO vary scope
+# (initialize.py's per-domain loop, catalog rebuild) pass an explicit scope
+# instead of reading this.
+SCOPE = DEFAULT_SCOPE
+
+
+def domain_for(scope: str = None) -> Domain:
+    scope = scope or DEFAULT_SCOPE
+    try:
+        return DOMAINS[scope]
+    except KeyError:
+        raise KeyError(f"{scope!r} is not a configured domain - see "
+                       f"{DOMAINS_PATH} (configured: {sorted(DOMAINS)})")
+
 
 # FTS index names must be FULLY QUALIFIED in N1QL SEARCH() calls; the bare
 # short name fails to resolve there. The Search Service's own REST endpoints
 # (couchbase_io.py's create/delete/count/facet, scoped under /bucket/{b}/
 # scope/{s}/index/{name}) take the bare name instead - the scope already
 # names the bucket and scope, so repeating them in the index name 400s.
-#
-# Fixed, not environment-configurable, same reasoning as BUCKET/SCOPE above -
-# and deliberately named for PRISM itself, not any one corpus that happens to
-# be loaded through it. It was "ftsFinanceBench" until 2026-09-07, a name left
-# over from before ftsPrism existed; Initialize faithfully rebuilds an index
-# under whatever name design/fts-index.json carries, so the two must always
-# agree, or every SEARCH() in the app (retrieval, the Document Workbench,
-# catalog extraction) resolves against a name nothing created.
-FTS_DOCS_INDEX_NAME = "ftsPrism"
-FTS_DOCS_INDEX = f"{BUCKET}.{SCOPE}.{FTS_DOCS_INDEX_NAME}"
+def fts_docs_index_name(scope: str = None) -> str:
+    return domain_for(scope).docs_index
+
+
+def fts_docs_index(scope: str = None) -> str:
+    return f"{BUCKET}.{scope or DEFAULT_SCOPE}.{fts_docs_index_name(scope)}"
+
 
 # Search index over the CATALOG collection (not docs) - lets document
-# resolution narrow a shortlist via SEARCH() instead of loading every
-# catalog entry into Python and scanning it, which does not survive past a
-# few thousand documents let alone the "millions of docs" scale this was
-# built for. design/fts-catalog-index.json is the captured definition;
-# Initialize rebuilds it the same way it rebuilds FTS_DOCS_INDEX.
-FTS_CATALOG_INDEX_NAME = "ftsPrismCatalog"
-FTS_CATALOG_INDEX = f"{BUCKET}.{SCOPE}.{FTS_CATALOG_INDEX_NAME}"
+# resolution narrow a shortlist via SEARCH() instead of loading every catalog
+# entry into Python and scanning it, which does not survive past a few
+# thousand documents let alone the "millions of docs" scale this was built
+# for. design/fts-catalog-index.json is the captured definition; Initialize
+# rebuilds it per domain the same way it rebuilds the docs index.
+def fts_catalog_index_name(scope: str = None) -> str:
+    return domain_for(scope).catalog_index
+
+
+def fts_catalog_index(scope: str = None) -> str:
+    return f"{BUCKET}.{scope or DEFAULT_SCOPE}.{fts_catalog_index_name(scope)}"
+
+
+# Computed for DEFAULT_SCOPE, same transitional reasoning as SCOPE above -
+# every call site not yet threaded through an explicit scope reads these.
+FTS_DOCS_INDEX_NAME = fts_docs_index_name()
+FTS_DOCS_INDEX = fts_docs_index()
+FTS_CATALOG_INDEX_NAME = fts_catalog_index_name()
+FTS_CATALOG_INDEX = fts_catalog_index()
 
 
 def couchbase_host() -> str:
@@ -54,21 +144,25 @@ def couchbase_auth() -> tuple:
 
 
 # --- Source objects --------------------------------------------------------
-def aws_folder() -> str:
-    """AWS_FOLDER is written in ordinary AWS folder notation (e.g. "Prism/3M",
-    a real S3 prefix with a slash) - the flattening to underscores is the
-    workflow's own doing, not something a human should have to pre-compute
-    and keep in sync by hand. Verified live: an S3 key "Prism/3M/x.pdf"
-    becomes `xmeta-data.filename` "..._Prism_3M_x.pdf" - the slash becomes an
-    underscore same as every other path segment join."""
-    return os.environ["AWS_FOLDER"].replace("/", "_")
+# aws_folder is per-domain topology (design/domains.yaml), not a secret - it
+# used to be a flat AWS_FOLDER env var before domains existed, back when there
+# was only one scope to feed from one S3 prefix.
+def aws_folder(scope: str = None) -> str:
+    """domain_for(scope).aws_folder is written in ordinary AWS folder notation
+    (e.g. "Prism/3M", a real S3 prefix with a slash) - the flattening to
+    underscores is the workflow's own doing, not something a human should
+    have to pre-compute and keep in sync by hand. Verified live: an S3 key
+    "Prism/3M/x.pdf" becomes `xmeta-data.filename` "..._Prism_3M_x.pdf" - the
+    slash becomes an underscore same as every other path segment join."""
+    return domain_for(scope).aws_folder.replace("/", "_")
 
 
-def source_filename(doc_name: str) -> str:
+def source_filename(doc_name: str, scope: str = None) -> str:
     """The AI Data Plane workflow derives the stored filename from the S3
     location as {bucket}_{folder}_{name}.pdf, so a catalog doc_name does not
-    match `xmeta-data.filename` directly."""
-    return f"{os.environ['AWS_BUCKET']}_{aws_folder()}_{doc_name}.pdf"
+    match `xmeta-data.filename` directly. AWS_BUCKET is account-level (still
+    in local.yaml); the folder is per-domain."""
+    return f"{os.environ['AWS_BUCKET']}_{aws_folder(scope)}_{doc_name}.pdf"
 
 
 # --- Models ----------------------------------------------------------------

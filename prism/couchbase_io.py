@@ -76,22 +76,24 @@ def query(statement: str, params: dict = None, timeout: int = 60) -> list:
         raise
 
 
-def ensure_primary_index(collection: str) -> None:
+def ensure_primary_index(collection: str, scope: str = None) -> None:
+    scope = scope or config.DEFAULT_SCOPE
     query(f"CREATE PRIMARY INDEX IF NOT EXISTS ON "
-          f"`{config.BUCKET}`.`{config.SCOPE}`.`{collection}`")
+          f"`{config.BUCKET}`.`{scope}`.`{collection}`")
 
 
-def _search_admin_url(index_name: str = "") -> str:
+def _search_admin_url(index_name: str = "", scope: str = None) -> str:
+    scope = scope or config.DEFAULT_SCOPE
     base = (f"https://{config.couchbase_host()}:18094/api/bucket/"
-            f"{config.BUCKET}/scope/{config.SCOPE}/index")
+            f"{config.BUCKET}/scope/{scope}/index")
     return f"{base}/{index_name}" if index_name else base
 
 
-def get_search_index_definition(index_name: str) -> dict:
+def get_search_index_definition(index_name: str, scope: str = None) -> dict:
     """The live index definition, scoped-index REST path. The flat
     /api/index/{name} path 400s ("index not found") for a scoped index -
     verified live rather than assumed when this was first written."""
-    resp = requests.get(_search_admin_url(index_name), auth=config.couchbase_auth(),
+    resp = requests.get(_search_admin_url(index_name, scope), auth=config.couchbase_auth(),
                         verify=False, timeout=30)
     resp.raise_for_status()
     body = resp.json()
@@ -100,26 +102,26 @@ def get_search_index_definition(index_name: str) -> dict:
     return body["indexDef"]
 
 
-def delete_search_index(index_name: str) -> None:
+def delete_search_index(index_name: str, scope: str = None) -> None:
     """Deleting a nonexistent index is not an error here - Initialize always
     deletes-then-recreates, so a fresh environment with no index yet must not
     fail this step. A missing SCOPED index is not a 404, though - verified
     live: it comes back 400 with "index not found" in the body, the same
     shape as any other malformed-request error, so that specific message is
     what's checked for rather than the status code alone."""
-    resp = requests.delete(_search_admin_url(index_name), auth=config.couchbase_auth(),
+    resp = requests.delete(_search_admin_url(index_name, scope), auth=config.couchbase_auth(),
                            verify=False, timeout=30)
     if resp.status_code == 400 and "index not found" in resp.text:
         return
     resp.raise_for_status()
 
 
-def search_index_count(index_name: str) -> int:
+def search_index_count(index_name: str, scope: str = None) -> int:
     """How many documents the index has processed so far - not the corpus
     total, the index's OWN progress. Used to know when a freshly (re)created
     index has caught up, since a drop+recreate starts it from empty and a
     query against it returns incomplete results until it does."""
-    resp = requests.get(f"{_search_admin_url(index_name)}/count",
+    resp = requests.get(f"{_search_admin_url(index_name, scope)}/count",
                         auth=config.couchbase_auth(), verify=False, timeout=30)
     resp.raise_for_status()
     body = resp.json()
@@ -129,7 +131,8 @@ def search_index_count(index_name: str) -> int:
 
 
 def wait_for_search_index(index_name: str, target_count: int, timeout: int = 300,
-                          poll_interval: int = 3, on_progress=None) -> int:
+                          poll_interval: int = 3, on_progress=None,
+                          scope: str = None) -> int:
     """Polls search_index_count() until it reaches target_count or timeout.
     Measured live on this corpus: a full reindex of 177,140 documents
     completes in under a minute, so the default timeout is generous rather
@@ -140,7 +143,7 @@ def wait_for_search_index(index_name: str, target_count: int, timeout: int = 300
     started = time.perf_counter()
     count = 0
     while time.perf_counter() - started < timeout:
-        count = search_index_count(index_name)
+        count = search_index_count(index_name, scope)
         if on_progress:
             on_progress(count, target_count)
         if count >= target_count:
@@ -151,7 +154,8 @@ def wait_for_search_index(index_name: str, target_count: int, timeout: int = 300
         "- did not finish reindexing in time")
 
 
-def search_facet(index_name: str, field: str, size: int = 1000) -> list:
+def search_facet(index_name: str, field: str, size: int = 1000,
+                 scope: str = None) -> list:
     """Distinct values of an indexed field, with each value's document count -
     a match_all query with size=0 (no document hits returned, only the
     facet), so this is cheap regardless of corpus size. Field must be mapped
@@ -161,7 +165,7 @@ def search_facet(index_name: str, field: str, size: int = 1000) -> list:
     against a query that scan took much longer to run.
     """
     resp = requests.post(
-        f"{_search_admin_url(index_name)}/query", auth=config.couchbase_auth(),
+        f"{_search_admin_url(index_name, scope)}/query", auth=config.couchbase_auth(),
         json={"query": {"match_all": {}}, "size": 0,
               "facets": {"_": {"field": field, "size": size}}},
         verify=False, timeout=60,
@@ -179,7 +183,7 @@ def search_facet(index_name: str, field: str, size: int = 1000) -> list:
     return body.get("facets", {}).get("_", {}).get("terms", []) or []
 
 
-def create_search_index(definition: dict) -> None:
+def create_search_index(definition: dict, scope: str = None, index_name: str = None) -> None:
     """PUTs a new index from a definition read back from a live index (e.g.
     design/fts-index.json) - which carries three identifiers the SERVER
     assigns and the client must not resupply when creating a fresh index:
@@ -188,11 +192,22 @@ def create_search_index(definition: dict) -> None:
     these stripped creates a working index the server assigns fresh IDs to;
     querying it returns results identical to the index it was copied from.
 
-    sourceName and the scope name are overridden from config rather than
-    trusted from the file, so a definition captured against one bucket/scope
-    still creates correctly against whatever this environment is configured
-    for.
+    sourceName and the scope name are overridden from config/`scope` rather
+    than trusted from the file, so a definition captured against one
+    bucket/scope still creates correctly against whatever domain this is
+    being created for. `index_name`, if given, overrides the definition's own
+    `name` - one definition (design/fts-index.json) drives a differently-
+    named index per domain (ftsSecfilingsDocs, ftsIso20020Docs, ...).
+
+    The mapping.types key encodes "{scope}.{collection}" (doc_config.mode is
+    scope.collection.type_field) - captured from whatever scope this
+    definition was last read back from, so it is rewritten to the scope this
+    index is actually being created in. Left unrewritten, a definition
+    captured against one domain would create an index in another domain's
+    scope that never matches any document there, since FTS reads that key to
+    know which scope.collection to listen to.
     """
+    scope = scope or config.DEFAULT_SCOPE
     body = copy.deepcopy(definition)
     body.pop("uuid", None)
     body.pop("sourceUUID", None)
@@ -200,8 +215,14 @@ def create_search_index(definition: dict) -> None:
     for collection in (body.get("sourceParams", {})
                           .get("scopeParams", {}).get("collections", [])):
         collection.pop("uid", None)
-    body["sourceParams"]["scopeParams"]["name"] = config.SCOPE
-    resp = requests.put(_search_admin_url(body["name"]), auth=config.couchbase_auth(),
+    body["sourceParams"]["scopeParams"]["name"] = scope
+    if index_name:
+        body["name"] = index_name
+    types = body["params"]["mapping"]["types"]
+    body["params"]["mapping"]["types"] = {
+        f"{scope}.{key.rpartition('.')[2]}": mapping for key, mapping in types.items()
+    }
+    resp = requests.put(_search_admin_url(body["name"], scope), auth=config.couchbase_auth(),
                         json=body, verify=False, timeout=30)
     resp.raise_for_status()
     result = resp.json()
