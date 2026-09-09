@@ -12,13 +12,19 @@ guess about labeling convention, not a claim about any document's actual
 printed numbers, so the same anti-hallucination guardrail applies for the
 same reason.
 
-One formula per entry, by design (the user's own rule) - multiple approved
+One formula per entry, by design (the user's own rule) - multiple
 conventions for the same concept coexist as separate entries sharing a
-canonical_name, distinguished by `formula_type` ("primary" vs "alternate",
+`metric` name, distinguished by `formula_type` ("Preferred" vs "Alternate",
 open-ended past those two). matching.find_metric() prefers the entry tagged
-"primary" when more than one approved entry matches - see that module.
+"Preferred" when more than one entry matches, unless the plan's own
+formula_preference names a different one explicitly - see that module.
+
+The document key is a UUID, not a slug derived from the metric name: this
+is meant to be created from a form (metric name, alias, primary/alternate,
+a formula in ordinary words, a threshold), and a form doesn't compute a
+stable id from what a person just typed - it mints one.
 """
-import re
+import uuid
 
 from .. import llm
 from .evaluator import FormulaError, formula_facts
@@ -69,56 +75,35 @@ def compile_formula(metric: str, user_friendly_formula: str, model: str = None) 
     return {"formula": formula, "facts": result.get("facts") or []}
 
 
-def build_metric_entry(metric: str, user_friendly_formula: str, formula_type: str = "primary",
-                       abbreviation: str = None, aliases: list = None,
-                       threshold_operator: str = None, threshold_number: float = None,
-                       context: str = None, domain: str = "finance",
-                       document_types: list = None, model: str = None) -> tuple:
-    """Returns (metric_entry, policy_entry_or_None) - not yet saved.
-
-    id is suffixed by formula_type for anything but "primary", so multiple
-    conventions for one concept get distinct ids instead of colliding (and
-    replacing each other) the way approve()'s single-entry-per-concept
-    semantics would.
+def build_metric_entry(metric: str, user_friendly_formula: str, formula_type: str = "Preferred",
+                       abbreviation: str = None, threshold_operator: str = None,
+                       threshold_number: float = None, context: str = None,
+                       model: str = None) -> dict:
+    """One flat, self-contained entry - not yet saved. Every field but
+    `formula`, `required_facts` and `bm25_table_anchors` maps directly to a
+    form field (metric, abbreviation, formula_type, user_friendly_formula,
+    threshold_operator, threshold_number, context); those three are the ones
+    a form never asks for, generated here instead.
     """
-    slug = re.sub(r"[^a-z0-9]+", "_", metric.lower()).strip("_")
-    suffix = "" if formula_type == "primary" else "_" + re.sub(r"[^a-z0-9]+", "_",
-                                                               formula_type.lower()).strip("_")
-    metric_id = f"{domain}.{slug}{suffix}"
-
     compiled = compile_formula(metric, user_friendly_formula, model=model)
     formula = compiled["formula"]
     required_facts = formula_facts(formula)
     anchors = [f["printed_label"] for f in compiled["facts"] if f.get("printed_label")]
 
     entry = {
-        "id": metric_id,
-        "entry_type": "metric",
-        "scope": {"domain": domain, "document_types": document_types or ["10-K", "10-Q"]},
-        "recognition": {
-            "canonical_name": metric.lower(),
-            "aliases": ([abbreviation] if abbreviation else []) + (aliases or []),
-        },
-        "interpretation": {
-            "formula": formula,
-            "required_facts": required_facts,
-            "user_friendly_formula": user_friendly_formula,
-            "content_anchors": anchors,
-        },
+        "id": str(uuid.uuid4()),
+        "metric": metric,
         "formula_type": formula_type,
-        "governance": {"status": "approved", "source": "human_review", "version": 1},
+        "user_friendly_formula": user_friendly_formula,
+        "formula": formula,
+        "required_facts": required_facts,
+        "bm25_table_anchors": {"target_strings": anchors},
     }
+    if abbreviation:
+        entry["abbreviation"] = abbreviation
     if context:
         entry["context"] = context
-
-    policy_entry = None
     if threshold_operator and threshold_number is not None:
-        policy_entry = {
-            "id": f"{metric_id}.policy",
-            "entry_type": "interpretation_policy",
-            "applies_to": metric_id,
-            "scope": {"domain": domain},
-            "policy": {"operator": threshold_operator, "value": float(threshold_number)},
-            "governance": {"status": "approved", "source": "human_review", "version": 1},
-        }
-    return entry, policy_entry
+        entry["threshold_operator"] = threshold_operator
+        entry["threshold_number"] = float(threshold_number)
+    return entry

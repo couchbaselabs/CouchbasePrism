@@ -42,8 +42,9 @@ def main():
     questions = corpus.questions(company=args.company, limit=args.limit)
     catalog_docs = catalog.load_all()
     dictionary_data = dictionary.load()
-    approved = sum(1 for e in dictionary_data.get("entries", [])
-                   if e.get("governance", {}).get("status") == "approved")
+    # Presence in the dictionary IS the approval now - no separate status
+    # to filter on.
+    approved = len(dictionary_data.get("entries", []))
     options = phases.get(args.phase)
     overrides = {k: v for k, v in {
         "fusion": args.fusion,

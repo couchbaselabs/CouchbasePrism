@@ -189,7 +189,7 @@ def test_mixed_periods_invalidate_every_binding():
 
 # ------------------------------------------------------------- conclusion
 
-POLICY = {"policy": {"healthy_at_or_above": 1.0}}
+POLICY = {"threshold_operator": ">=", "threshold_number": 1.0}
 
 
 def test_no_policy_means_no_verdict_is_authorised():

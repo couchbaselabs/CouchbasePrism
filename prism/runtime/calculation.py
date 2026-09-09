@@ -191,7 +191,7 @@ def candidate_facts(candidates: list) -> list:
 def compute(entry, candidates: list, facts: dict) -> dict:
     result = {"governed": entry is not None, "computed": [], "errors": []}
     specs = ([{"method_name": "approved", "candidate_id": "approved",
-               "formula": entry["interpretation"]["formula"]}]
+               "formula": entry["formula"]}]
              if entry else candidates)
     for spec in specs:
         formula = spec.get("formula", "")

@@ -1,46 +1,36 @@
-"""Interpretation policies — the judgment, kept separate from the arithmetic.
+"""Interpretation policy — the judgment, kept conceptually separate from the
+arithmetic even though both now live on the SAME dictionary entry.
 
 Computing a quick ratio of 0.96 is arithmetic. Concluding that 0.96 is
 *unhealthy* is a threshold judgment: 0.9 is comfortable for a business with
 fast, predictable receivables and alarming for one without. Conflating them
 would have PRISM silently import a generic textbook threshold with exactly the
-false confidence this design exists to eliminate.
-
-Policies version independently of the metric they apply to, because one metric
-may carry different thresholds for different organisations, and a change of
-risk appetite must not force re-approval of the arithmetic.
+false confidence this design exists to eliminate - so a metric with a formula
+but no threshold_operator/threshold_number computes a value and still
+declines any verdict; see validation.validate_conclusion.
 """
 import operator as _operator
 
-# {"operator": ">=", "value": 1.0} - the shape dictionary.compile.
-# build_metric_entry() writes, general enough to express any of the four
-# comparisons without a new policy type per operator.
+# {"threshold_operator": ">=", "threshold_number": 1.0} - one general shape
+# for all four comparisons, rather than a policy type per operator.
 _OPERATORS = {">=": _operator.ge, "<=": _operator.le,
              ">": _operator.gt, "<": _operator.lt, "==": _operator.eq}
 
 
-def judge(value: float, policy: dict):
-    """Returns (verdict, explanation), or (None, reason) when the policy cannot
-    decide. Deliberately narrow - thresholds only. A richer judgment shape
-    should be a new policy type, not a special case bolted on here.
-
-    "healthy_at_or_above" is the original, still-supported shape (implicitly
-    ">="); {"operator", "value"} is the general form for any of the four
-    comparisons. Both are checked, not one replacing the other - existing
-    approved policies never need re-writing for this to keep working."""
-    rules = (policy or {}).get("policy", {})
-    if "healthy_at_or_above" in rules:
-        threshold = float(rules["healthy_at_or_above"])
-        ok = value >= threshold
-        return ok, (f"{value:.4g} is {'at or above' if ok else 'below'} the approved "
-                    f"threshold of {threshold:g}")
-    if "operator" in rules and "value" in rules:
-        op_symbol = rules["operator"]
-        op_fn = _OPERATORS.get(op_symbol)
-        if op_fn is None:
-            return None, f"approved policy uses an operator this runtime does not understand: {op_symbol!r}"
-        threshold = float(rules["value"])
-        ok = op_fn(value, threshold)
-        return ok, (f"{value:.4g} is {'' if ok else 'not '}{op_symbol} the approved "
-                    f"threshold of {threshold:g}")
-    return None, "approved policy carries no rule this runtime understands"
+def judge(value: float, entry: dict):
+    """Returns (verdict, explanation), or (None, reason) when the entry
+    carries no threshold, or one this runtime does not understand.
+    Deliberately narrow - thresholds only. A richer judgment shape should be
+    a new field, not a special case bolted on here."""
+    entry = entry or {}
+    op_symbol = entry.get("threshold_operator")
+    threshold_number = entry.get("threshold_number")
+    if op_symbol is None or threshold_number is None:
+        return None, "no approved threshold exists for this metric"
+    op_fn = _OPERATORS.get(op_symbol)
+    if op_fn is None:
+        return None, f"approved policy uses an operator this runtime does not understand: {op_symbol!r}"
+    threshold = float(threshold_number)
+    ok = op_fn(value, threshold)
+    return ok, (f"{value:.4g} is {'' if ok else 'not '}{op_symbol} the approved "
+                f"threshold of {threshold:g}")

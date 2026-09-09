@@ -122,8 +122,7 @@ def forget(args):
     entry = dictionary.find_metric(dictionary.load(), args.concept)
     if entry is None:
         sys.exit(f"no approved entry matches {args.concept!r}")
-    print(f"will remove {entry['id']}: {entry['interpretation']['formula']}",
-          file=sys.stderr)
+    print(f"will remove {entry['id']}: {entry['formula']}", file=sys.stderr)
     if not _confirm("Remove it?", args.yes):
         sys.exit("aborted")
     for removed in dictionary.forget(args.concept):

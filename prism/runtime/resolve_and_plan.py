@@ -54,7 +54,8 @@ Return ONLY one JSON object:
     {"id": "<snake_case, the quantity only>", "description": "<what it represents>",
      "content_anchors": ["<label expected verbatim in the source>"]}
   ],
-  "preferred_artifacts": ["table" | "text" | "diagram" | "chart" | "log", ...]
+  "preferred_artifacts": ["table" | "text" | "diagram" | "chart" | "log", ...],
+  "formula_preference": "<null, or the convention the question explicitly named>"
 }
 
 RESOLUTION (part 1):
@@ -107,6 +108,11 @@ it would in isolation, because part 1 just told you which company this is.
   better than an invented label.
 - Never propose a formula, compute a value, or make the final judgment -
   that happens downstream.
+- formula_preference: null UNLESS the question itself explicitly names a
+  specific convention to use ("use the alternate formula", "using the
+  preferred method") - copy the wording it used (e.g. "alternate",
+  "preferred"). Do not set it just because the concept happens to have more
+  than one convention; only the question asking for a specific one does.
 
 Return strictly valid JSON - no markdown, no explanatory text outside the
 object.
@@ -138,7 +144,8 @@ def resolve_and_plan(question: str, manifest: dict = None, scope: str = None,
              ("companies", "doc_types", "years", "quarters", "reasoning",
               "selection_complete", "missing_evidence")}
     plan = {k: result.get(k) for k in
-           ("concept", "answer_kind", "required_facts", "preferred_artifacts")}
+           ("concept", "answer_kind", "required_facts", "preferred_artifacts",
+            "formula_preference")}
 
     documents = resolve_documents(intent.get("companies") or [],
                                   intent.get("doc_types") or [],

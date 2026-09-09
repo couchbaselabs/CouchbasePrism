@@ -122,14 +122,18 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                                 source_filename=(entry or {}).get("source_filename"))
 
     kind = plan.get("answer_kind")
-    entry = policy = None
+    entry = None
     bound, candidates, rejected = [], [], []
     calc = {"governed": False, "computed": [], "errors": []}
     conclusion = {}
 
     if options.governance:
-        entry = dictionary.find_metric(dictionary_data, plan.get("concept", ""))
-        policy = dictionary.find_policy(dictionary_data, entry["id"]) if entry else None
+        # formula_preference: set only when the question itself explicitly
+        # asked for a specific convention ("use the alternate formula") - see
+        # resolve_and_plan.py's prompt. None (the common case) lets
+        # find_metric() fall back to whichever entry is tagged "Preferred".
+        entry = dictionary.find_metric(dictionary_data, plan.get("concept", ""),
+                                       formula_type=plan.get("formula_preference"))
 
         # `attribution` is deliberately absent: the source states the
         # explanation, so there is nothing to compute. Including it cost 118 of
@@ -139,7 +143,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         if kind in ("derived_metric", "judgment"):
             planned = [to_identifier(f) for f in retrieval.fact_ids(plan)]
             if entry:
-                needed = set(entry["interpretation"]["required_facts"])
+                needed = set(entry["required_facts"])
                 fact_specs = {fid: {"id": fid} for fid in needed}
             else:
                 # Propose FIRST, then bind the union of what the plan asked for
@@ -169,7 +173,7 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                     fact["period_role"] = role
             bound = validate_bindings(raw_bound, chunks)
             calc = compute(entry, candidates, grounded_facts(bound))
-            conclusion = validate_conclusion(calc["computed"], policy)
+            conclusion = validate_conclusion(calc["computed"], entry)
 
     answer = synthesize(question, chunks, calc, conclusion, model=model)
 
@@ -185,7 +189,8 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
         "concept": plan.get("concept"),
         "governed": calc["governed"],
         "dictionary_entry": entry["id"] if entry else None,
-        "has_policy": policy is not None,
+        "has_policy": bool(entry) and entry.get("threshold_operator") is not None
+                     and entry.get("threshold_number") is not None,
         "chunks": chunks,
         "bound_facts": bound,
         "candidates": candidates,

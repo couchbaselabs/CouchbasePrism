@@ -1,8 +1,10 @@
-"""Matching a planner-identified concept to an approved entry.
+"""Matching a planner-identified concept to a dictionary entry.
 
-Only `approved` entries are usable. A `proposed` entry is a record of
-unresolved ambiguity, not an authority - treating it as one would skip the
-human decision the whole design depends on.
+Every entry that exists in the dictionary is authoritative by construction -
+there is no separate "proposed" or "approved" governance status to check
+anymore. An entry only ever gets there through dictionary.compile (a form)
+or dictionary.approval (a governed correction from an answer already seen),
+both human-reviewed acts - so presence in the collection IS the approval.
 """
 
 
@@ -14,24 +16,25 @@ def _normalize(s: str) -> str:
     return " ".join((s or "").lower().replace("-", " ").replace("_", " ").split())
 
 
-def find_metric(dictionary: dict, concept: str):
-    """The first approved entry matching `concept`, UNLESS more than one
-    matches - multiple approved conventions can coexist for one concept
-    (dictionary.compile.build_metric_entry's formula_type), and when they
-    do, the one explicitly tagged "primary" drives computation by default.
-    An entry with no formula_type at all (every entry before this field
-    existed) defaults to "primary" - a single, unambiguous entry behaves
-    exactly as it always did."""
+def find_metric(dictionary: dict, concept: str, formula_type: str = None):
+    """The dictionary entry matching `concept`, by metric name or
+    abbreviation. When more than one entry matches (a primary/alternate
+    pair - see dictionary.compile.build_metric_entry), `formula_type`
+    (typically read from the plan's own formula_preference field, when the
+    question explicitly asked for a specific convention) picks a specific
+    one if it names one that exists; otherwise the entry with no
+    formula_type at all, or explicitly tagged "Preferred", wins - an entry
+    from before this field existed defaults to "Preferred" so a single
+    unambiguous entry behaves exactly as it always did.
+    """
     target = _normalize(concept)
     if not target:
         return None
     matches = []
     for entry in dictionary.get("entries", []):
-        if (entry.get("entry_type") != "metric"
-                or entry.get("governance", {}).get("status") != "approved"):
-            continue
-        names = [entry.get("recognition", {}).get("canonical_name", "")]
-        names += entry.get("recognition", {}).get("aliases") or []
+        names = [entry.get("metric", "")]
+        if entry.get("abbreviation"):
+            names.append(entry["abbreviation"])
         for name in names:
             normalized = _normalize(name)
             if normalized and (normalized == target
@@ -40,14 +43,12 @@ def find_metric(dictionary: dict, concept: str):
                 break
     if not matches:
         return None
-    primary = [e for e in matches if e.get("formula_type", "primary") == "primary"]
-    return (primary or matches)[0]
-
-
-def find_policy(dictionary: dict, metric_id: str):
-    for entry in dictionary.get("entries", []):
-        if (entry.get("entry_type") == "interpretation_policy"
-                and entry.get("governance", {}).get("status") == "approved"
-                and entry.get("applies_to") == metric_id):
-            return entry
-    return None
+    if formula_type:
+        wanted = _normalize(formula_type)
+        chosen = [e for e in matches
+                 if _normalize(e.get("formula_type") or "preferred") == wanted]
+        if chosen:
+            return chosen[0]
+    preferred = [e for e in matches
+                if _normalize(e.get("formula_type") or "preferred") == "preferred"]
+    return (preferred or matches)[0]

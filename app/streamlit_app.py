@@ -1222,32 +1222,23 @@ with st.sidebar:
 
     st.space("small")
     st.markdown("### Governance")
-    approved = [e for e in dictionary_data.get("entries", [])
-                if e.get("governance", {}).get("status") == "approved"]
-    st.metric("Approved entries", len(approved), border=True)
+    entries = dictionary_data.get("entries", [])
+    st.metric("Dictionary entries", len(entries), border=True)
     with st.expander("Dictionary entries", icon=":material/menu_book:"):
-        if approved:
-            # An id alone doesn't say what was approved, and the two entry types
-            # are the point: a metric without a policy computes a value but
-            # cannot deliver a verdict.
-            metrics = [e for e in approved if e.get("entry_type") == "metric"]
-            policies = {e.get("applies_to"): e for e in approved
-                        if e.get("entry_type") == "interpretation_policy"}
-            for entry in metrics:
-                st.markdown(f"**{entry.get('id')}**")
-                st.code(entry.get("interpretation", {}).get("formula", ""), language=None)
-                policy = policies.get(entry.get("id"))
-                if policy:
-                    rules = ", ".join(f"{k} {v}" for k, v in
-                                      (policy.get("policy") or {}).items())
-                    st.caption(f":material/gavel: policy · {rules}")
+        if entries:
+            # Presence in the dictionary IS the approval now - one flat
+            # entry per convention, formula and threshold together.
+            for entry in entries:
+                label = entry.get("metric", entry.get("id"))
+                tag = entry.get("formula_type")
+                st.markdown(f"**{label}**" + (f" · {tag}" if tag else ""))
+                st.code(entry.get("formula", ""), language=None)
+                if entry.get("threshold_operator") is not None:
+                    st.caption(f":material/gavel: threshold · {entry['threshold_operator']} "
+                              f"{entry.get('threshold_number')}")
                 else:
-                    st.caption(":material/warning: no interpretation policy — computes a "
+                    st.caption(":material/warning: no threshold approved — computes a "
                                "value, declines any verdict")
-            orphans = [p for a, p in policies.items()
-                       if a not in {e.get("id") for e in metrics}]
-            for policy in orphans:
-                st.caption(f"policy with no metric: {policy.get('id')}")
             # Resetting is a demo operation, not an accident to guard against:
             # the cold half of the two-pass story needs an empty dictionary, and
             # dropping to a terminal mid-demo breaks the narrative.
