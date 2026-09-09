@@ -14,6 +14,7 @@ import pathlib
 import re
 import sys
 import time
+import uuid
 
 from dataclasses import replace
 
@@ -26,7 +27,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from eval import judge, phases  # noqa: E402
 from eval.corpora import load as load_corpus  # noqa: E402
 from prism import (  # noqa: E402
-    catalog, config, couchbase_io, dictionary, retrieval, runtime, trace,
+    catalog, concepts, config, couchbase_io, dictionary, retrieval, runtime, trace,
 )
 from prism import initialize as prism_initialize  # noqa: E402
 from prism import s3_upload  # noqa: E402
@@ -1196,6 +1197,7 @@ with st.sidebar:
         if config.DEFAULT_SCOPE in scope_options else 0)
     catalog_docs = load_catalog(scope)
     dictionary_data = dictionary.load(scope=scope)
+    concepts_data = concepts.load(scope=scope)
     # Every current question belongs to the default scope's corpus (ftsprism,
     # 3M's SEC filings) - a scope with no question fixtures yet (iso20020,
     # architecture only so far) simply has none, not an error.
@@ -1301,9 +1303,10 @@ if st.session_state.get("last_selection_key") != selection_key:
     st.session_state.pop("showcase_runs", None)
     st.session_state["last_selection_key"] = selection_key
 
-tab_setup, tab_ask, tab_workbench = st.tabs(
+tab_setup, tab_ask, tab_workbench, tab_governance = st.tabs(
     [":material/settings: Setup", ":material/chat: Ask a question",
-     ":material/find_in_page: Document workbench"])
+     ":material/find_in_page: Document workbench",
+     ":material/menu_book: Dictionary & concepts"])
 
 with tab_setup:
     st.caption("Everything a fresh environment needs before the first question can "
@@ -1571,3 +1574,260 @@ with tab_workbench:
                         st.html(highlight_terms(chunk.get("text-to-embed"), highlight_words))
                         st.divider()
                     st.json(chunk, expanded=True)
+
+with tab_governance:
+    st.caption("Create, edit, and remove the dictionary's approved formulas and the "
+               "concepts collection's known subject-matter terms - both scoped to "
+               f"**{scope}**, the domain selected in the sidebar. Plain fields, not "
+               "raw JSON - the two fields dictionary entries never ask for (the "
+               "executable formula, its content anchors) are generated automatically "
+               "on save, same as dictionary.compile always has.")
+    manage = st.segmented_control("Manage", ["Dictionary", "Concepts"],
+                                  default="Dictionary")
+
+    if manage == "Dictionary":
+        dict_entries = dictionary_data.get("entries", [])
+        section("Dictionary", f"{len(dict_entries)} entries in {scope}",
+               ":material/menu_book:")
+        if not dict_entries:
+            st.caption("Empty. PRISM still operates; add a formula below to govern one.")
+        for entry in dict_entries:
+            with st.container(border=True):
+                cols = st.columns([5, 1, 1])
+                with cols[0]:
+                    label = entry.get("metric", "(untitled)")
+                    bits = [label]
+                    if entry.get("formula_type"):
+                        bits.append(f"· {entry['formula_type']}")
+                    if entry.get("abbreviation"):
+                        bits.append(f"· _{entry['abbreviation']}_")
+                    st.markdown(f"**{' '.join(bits)}**")
+                    st.code(entry.get("formula", ""), language=None)
+                    if entry.get("user_friendly_formula"):
+                        st.caption(f"As entered: {entry['user_friendly_formula']}")
+                    if entry.get("threshold_operator") is not None:
+                        st.caption(f":material/gavel: threshold · "
+                                  f"{entry['threshold_operator']} {entry.get('threshold_number')}")
+                    anchors = (entry.get("bm25_table_anchors") or {}).get("target_strings") or []
+                    if anchors:
+                        st.caption("Anchors: " + ", ".join(anchors))
+                    if entry.get("context"):
+                        st.caption(entry["context"])
+                with cols[1]:
+                    if st.button("Edit", key=f"dict_edit_{entry['id']}", width="stretch"):
+                        st.session_state["editing_dict_id"] = entry["id"]
+                        st.rerun()
+                with cols[2]:
+                    if st.button("Delete", key=f"dict_del_{entry['id']}", width="stretch"):
+                        remaining = [e for e in dict_entries if e["id"] != entry["id"]]
+                        dictionary.save({"entries": remaining}, scope=scope)
+                        st.session_state.pop("editing_dict_id", None)
+                        st.toast(f"Removed {label}.", icon=":material/delete:")
+                        st.rerun()
+
+        editing_dict_id = st.session_state.get("editing_dict_id")
+        editing_entry = next((e for e in dict_entries if e["id"] == editing_dict_id), None) \
+            if editing_dict_id else None
+        # A stable-per-target key suffix, not a bare label - switching which
+        # entry is being edited (or from edit back to "add new") must count
+        # as a genuinely different widget, or Streamlit keeps whatever the
+        # user last typed into the OLD target instead of showing the newly
+        # selected entry's own values.
+        dict_target = editing_entry["id"] if editing_entry else "new"
+
+        st.space("medium")
+        with st.expander(f"Edit {editing_entry.get('metric', '')}" if editing_entry
+                         else "Add a new formula",
+                         icon=":material/edit:" if editing_entry else ":material/add:",
+                         expanded=bool(editing_entry)):
+            with st.form(f"dict_form_{dict_target}", border=False):
+                metric = st.text_input("Metric", value=(editing_entry or {}).get("metric", ""),
+                                       key=f"dict_metric_{dict_target}",
+                                       placeholder="e.g. Quick Ratio")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    abbreviation = st.text_input(
+                        "Alias / abbreviation", key=f"dict_abbr_{dict_target}",
+                        value=(editing_entry or {}).get("abbreviation", ""),
+                        placeholder="e.g. Acid-Test")
+                with col_b:
+                    formula_type_options = ["Preferred", "Alternate"]
+                    current_type = (editing_entry or {}).get("formula_type") or "Preferred"
+                    formula_type = st.selectbox(
+                        "Convention", formula_type_options, key=f"dict_type_{dict_target}",
+                        index=formula_type_options.index(current_type)
+                        if current_type in formula_type_options else 0)
+                user_friendly_formula = st.text_input(
+                    "Formula, in ordinary words", key=f"dict_formula_{dict_target}",
+                    value=(editing_entry or {}).get("user_friendly_formula", ""),
+                    placeholder="e.g. (Current Assets - Inventories) / Current Liabilities",
+                    help="The executable formula and its content anchors (the printed "
+                         "row labels retrieval looks for) are generated from this "
+                         "automatically - never typed in directly.")
+                col_c, col_d = st.columns(2)
+                with col_c:
+                    threshold_ops = ["(none)", ">=", "<=", ">", "<", "=="]
+                    current_op = (editing_entry or {}).get("threshold_operator") or "(none)"
+                    threshold_operator = st.selectbox(
+                        "Threshold operator", threshold_ops, key=f"dict_op_{dict_target}",
+                        index=threshold_ops.index(current_op) if current_op in threshold_ops
+                        else 0)
+                with col_d:
+                    threshold_number = st.number_input(
+                        "Threshold value", key=f"dict_threshold_{dict_target}",
+                        value=float((editing_entry or {}).get("threshold_number") or 1.0),
+                        step=0.1, disabled=threshold_operator == "(none)")
+                context = st.text_area(
+                    "Context / notes", key=f"dict_context_{dict_target}",
+                    value=(editing_entry or {}).get("context", ""))
+                submitted = st.form_submit_button(
+                    "Save changes" if editing_entry else "Compile and save",
+                    icon=":material/check:", type="primary")
+                if submitted:
+                    if not metric.strip() or not user_friendly_formula.strip():
+                        st.error("Metric and formula are both required.")
+                    else:
+                        op = None if threshold_operator == "(none)" else threshold_operator
+                        formula_unchanged = (editing_entry is not None and editing_entry.get(
+                            "user_friendly_formula") == user_friendly_formula)
+                        if formula_unchanged:
+                            # Metadata-only edit - no recompile, no LLM call,
+                            # since the formula text itself did not change.
+                            updated = dict(editing_entry)
+                            updated["metric"] = metric
+                            updated["formula_type"] = formula_type
+                            for field, value in (("abbreviation", abbreviation),
+                                                 ("context", context)):
+                                if value:
+                                    updated[field] = value
+                                else:
+                                    updated.pop(field, None)
+                            if op:
+                                updated["threshold_operator"] = op
+                                updated["threshold_number"] = float(threshold_number)
+                            else:
+                                updated.pop("threshold_operator", None)
+                                updated.pop("threshold_number", None)
+                        else:
+                            with st.spinner("Compiling the formula and its anchors…"):
+                                updated = dictionary.build_metric_entry(
+                                    metric=metric, user_friendly_formula=user_friendly_formula,
+                                    formula_type=formula_type, abbreviation=abbreviation or None,
+                                    threshold_operator=op,
+                                    threshold_number=threshold_number if op else None,
+                                    context=context or None)
+                            if editing_entry:
+                                updated["id"] = editing_entry["id"]  # same id, new formula
+                        remaining = [e for e in dict_entries
+                                    if e["id"] != (editing_entry or {}).get("id")]
+                        remaining.append(updated)
+                        dictionary.save({"entries": remaining}, scope=scope)
+                        st.session_state.pop("editing_dict_id", None)
+                        st.toast(f"Saved {metric}.", icon=":material/check_circle:")
+                        st.rerun()
+            if editing_entry and st.button("Cancel edit", key="dict_cancel_edit"):
+                st.session_state.pop("editing_dict_id", None)
+                st.rerun()
+
+    else:
+        concept_entries = concepts_data.get("entries", [])
+        section("Concepts", f"{len(concept_entries)} entries in {scope}",
+               ":material/travel_explore:")
+        st.caption("How this feeds retrieval: a matched concept's official filing "
+                  "terms and target sections join the same forced-phrase list "
+                  "#hash# spans use, once resolve_and_plan recognizes the question "
+                  "names it. Still architecture-only for corpora with none yet.")
+        if not concept_entries:
+            st.caption("Empty. Add a concept below.")
+        for entry in concept_entries:
+            with st.container(border=True):
+                cols = st.columns([5, 1, 1])
+                with cols[0]:
+                    st.markdown(f"**{entry.get('user_term', '(untitled)')}**")
+                    if entry.get("aliases"):
+                        st.caption("Aliases: " + ", ".join(entry["aliases"]))
+                    if entry.get("official_filing_terms"):
+                        st.caption("Official filing terms: "
+                                  + ", ".join(entry["official_filing_terms"]))
+                    if entry.get("target_sections"):
+                        st.caption("Target sections: " + ", ".join(entry["target_sections"]))
+                    if entry.get("subsidiaries_involved"):
+                        st.caption("Subsidiaries: " + ", ".join(entry["subsidiaries_involved"]))
+                with cols[1]:
+                    if st.button("Edit", key=f"concept_edit_{entry['id']}", width="stretch"):
+                        st.session_state["editing_concept_id"] = entry["id"]
+                        st.rerun()
+                with cols[2]:
+                    if st.button("Delete", key=f"concept_del_{entry['id']}", width="stretch"):
+                        remaining = [e for e in concept_entries if e["id"] != entry["id"]]
+                        concepts.save({"entries": remaining}, scope=scope)
+                        st.session_state.pop("editing_concept_id", None)
+                        st.toast(f"Removed {entry.get('user_term')}.",
+                                icon=":material/delete:")
+                        st.rerun()
+
+        editing_concept_id = st.session_state.get("editing_concept_id")
+        editing_concept = next((e for e in concept_entries if e["id"] == editing_concept_id),
+                               None) if editing_concept_id else None
+        concept_target = editing_concept["id"] if editing_concept else "new"
+
+        st.space("medium")
+        with st.expander(f"Edit {editing_concept.get('user_term', '')}" if editing_concept
+                         else "Add a new concept",
+                         icon=":material/edit:" if editing_concept else ":material/add:",
+                         expanded=bool(editing_concept)):
+            with st.form(f"concept_form_{concept_target}", border=False):
+                user_term = st.text_input(
+                    "User term", key=f"concept_term_{concept_target}",
+                    value=(editing_concept or {}).get("user_term", ""),
+                    placeholder="e.g. forever chemicals")
+                aliases = st.multiselect(
+                    "Aliases", key=f"concept_aliases_{concept_target}",
+                    options=(editing_concept or {}).get("aliases", []),
+                    default=(editing_concept or {}).get("aliases", []),
+                    accept_new_options=True,
+                    placeholder="Type a term a person might use, press enter")
+                official_filing_terms = st.multiselect(
+                    "Official filing terms", key=f"concept_terms_{concept_target}",
+                    options=(editing_concept or {}).get("official_filing_terms", []),
+                    default=(editing_concept or {}).get("official_filing_terms", []),
+                    accept_new_options=True,
+                    placeholder="Exact wording expected verbatim in a filing")
+                target_sections = st.multiselect(
+                    "Target sections", key=f"concept_sections_{concept_target}",
+                    options=(editing_concept or {}).get("target_sections", []),
+                    default=(editing_concept or {}).get("target_sections", []),
+                    accept_new_options=True,
+                    placeholder="e.g. Legal Proceedings")
+                subsidiaries_involved = st.multiselect(
+                    "Subsidiaries involved (optional)",
+                    key=f"concept_subs_{concept_target}",
+                    options=(editing_concept or {}).get("subsidiaries_involved", []),
+                    default=(editing_concept or {}).get("subsidiaries_involved", []),
+                    accept_new_options=True)
+                submitted = st.form_submit_button(
+                    "Save changes" if editing_concept else "Add concept",
+                    icon=":material/check:", type="primary")
+                if submitted:
+                    if not user_term.strip():
+                        st.error("User term is required.")
+                    else:
+                        updated = {
+                            "id": editing_concept["id"] if editing_concept else str(uuid.uuid4()),
+                            "user_term": user_term,
+                            "aliases": aliases,
+                            "official_filing_terms": official_filing_terms,
+                            "target_sections": target_sections,
+                        }
+                        if subsidiaries_involved:
+                            updated["subsidiaries_involved"] = subsidiaries_involved
+                        remaining = [e for e in concept_entries
+                                    if e["id"] != (editing_concept or {}).get("id")]
+                        remaining.append(updated)
+                        concepts.save({"entries": remaining}, scope=scope)
+                        st.session_state.pop("editing_concept_id", None)
+                        st.toast(f"Saved {user_term}.", icon=":material/check_circle:")
+                        st.rerun()
+            if editing_concept and st.button("Cancel edit", key="concept_cancel_edit"):
+                st.session_state.pop("editing_concept_id", None)
+                st.rerun()
