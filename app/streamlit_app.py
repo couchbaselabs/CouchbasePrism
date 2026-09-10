@@ -434,6 +434,18 @@ def section(title: str, caption: str = None, icon: str = None):
         st.caption(caption)
 
 
+def plain_prose(text: str) -> str:
+    """Streamlit's markdown renderer treats a pair of literal "$" as inline
+    LaTeX (KaTeX) delimiters, not currency - "$14,869 million ... fell to
+    $(9,128)" silently swallows both signs and re-renders everything between
+    them as a math span (verified live - this is a real rendering
+    corruption, not a cosmetic nitpick, same class of bug the PLAIN_PROSE_RULE
+    comment already documents for **bold**). The model is asked for plain
+    prose, never LaTeX, so escape every "$" before st.write/st.markdown/
+    st.info ever sees model- or user-authored free text."""
+    return text.replace("$", "\\$")
+
+
 def status_badge(passed):
     if passed is True:
         st.badge("Converged", icon=":material/check:", color="green")
@@ -739,7 +751,7 @@ def render_pipeline_trace(run: dict):
             show_llm_exchange(event, "Answer synthesis"
                               + (f" · call {number}" if len(llms["answer"]) > 1 else ""))
         st.markdown("**Out**")
-        st.info(result["answer"], icon=":material/auto_awesome:")
+        st.info(plain_prose(result["answer"]), icon=":material/auto_awesome:")
 
     with st.expander("6 · Evaluate against gold — pass/fail when a gold answer is available",
                      icon=":material/fact_check:"):
@@ -937,7 +949,7 @@ def render_detail(run: dict):
             st.caption("Custom question — no reference" if q["id"] == "custom"
                       else "Gold answer")
             if q["id"] == "custom":
-                st.write(q["expected_answer"])
+                st.write(plain_prose(q["expected_answer"]))
             else:
                 # concept/formula/evidence are ftsprism-native fields (see
                 # eval/corpora/ftsprism.py's questions()) - absent for any
@@ -969,14 +981,16 @@ def render_detail(run: dict):
                 st.code("\n".join(gold_lines), language=None, wrap_lines=True)
         with cols[1]:
             st.caption("PRISM answer")
+            st.write(plain_prose(result["answer"]))
             # calc["computed"]'s formula is shown directly, not left to the
             # model's own prose - deterministic and immune to whatever
             # formatting inconsistency the model's text might have, same
-            # reasoning as the plain-prose rule in answer.py.
+            # reasoning as the plain-prose rule in answer.py. Shown after the
+            # answer, not before - the answer is the point; the formula is
+            # the receipt for it, not a preamble to read first.
             for c in result["calculation"].get("computed") or []:
                 st.code(f"{c['label']}: {c['formula']} = {c['value']:.4g}",
                        language=None, wrap_lines=True)
-            st.write(result["answer"])
         st.caption(verdict.get("comment", ""))
 
     metrics = st.columns(4, border=True)
@@ -1234,40 +1248,6 @@ with st.sidebar:
                 icon=":material/upcoming:")
         model = config.OPENAI_MODEL
 
-    st.space("small")
-    st.markdown("### Governance")
-    entries = dictionary_data.get("entries", [])
-    st.metric("Dictionary entries", len(entries), border=True)
-    with st.expander("Dictionary entries", icon=":material/menu_book:"):
-        if entries:
-            # Presence in the dictionary IS the approval now - one flat
-            # entry per convention, formula and threshold together.
-            for entry in entries:
-                label = entry.get("metric", entry.get("id"))
-                tag = entry.get("formula_type")
-                st.markdown(f"**{label}**" + (f" · {tag}" if tag else ""))
-                st.code(entry.get("formula", ""), language=None)
-                if entry.get("threshold_operator") is not None:
-                    st.caption(f":material/gavel: threshold · {entry['threshold_operator']} "
-                              f"{entry.get('threshold_number')}")
-                else:
-                    st.caption(":material/warning: no threshold approved — computes a "
-                               "value, declines any verdict")
-            # Resetting is a demo operation, not an accident to guard against:
-            # the cold half of the two-pass story needs an empty dictionary, and
-            # dropping to a terminal mid-demo breaks the narrative.
-            if st.button("Reset dictionary", icon=":material/restart_alt:",
-                         width="stretch",
-                         help="Empty the dictionary to demonstrate the ungoverned "
-                              "path again. Equivalent to `manage.py reset-dictionary`."):
-                dictionary.clear()
-                st.session_state.pop("showcase_runs", None)
-                st.toast("Dictionary cleared — concepts are ungoverned again.",
-                         icon=":material/restart_alt:")
-                st.rerun()
-        else:
-            st.caption("Empty. PRISM still operates; entries arrive from reviewed use.")
-
 if custom_question.strip():
     # No gold reference exists for a question nobody wrote a gold
     # answer for - expected_answer is a display string, not data judge.score
@@ -1509,15 +1489,16 @@ with tab_workbench:
                "on it alongside the usual BM25 terms.")
     # Derived from the SELECTED scope's own catalog, not the eval question
     # corpus's company list (that list is gone now - a single-company
-    # installation has nothing to pick between there). Still a real,
-    # independent selector: it reads whatever company value the catalog
-    # itself extracted, for whichever scope is chosen in the sidebar.
+    # installation has nothing to pick between there). Labeled "Scope" like
+    # every other former "Company" control - this is a single-company
+    # installation, so this always resolves to the one company the sidebar's
+    # scope is already scoped to; it is not a second, independent axis.
     wb_companies = sorted({d.get("company") for d in catalog_docs if d.get("company")})
     wb_cols = st.columns([2, 3, 1, 2.5])
     with wb_cols[0]:
-        wb_company = (st.selectbox("Company", wb_companies, key="wb_company")
+        wb_company = (st.selectbox("Scope", wb_companies, key="wb_company")
                      if wb_companies else
-                     st.selectbox("Company", ["(none catalogued)"], disabled=True))
+                     st.selectbox("Scope", ["(none catalogued)"], disabled=True))
     wb_doc_names = sorted({d.get("doc_name") for d in company_catalog(catalog_docs, wb_company)
                           if d.get("doc_name")})
     with wb_cols[1]:
@@ -1584,6 +1565,20 @@ with tab_governance:
                ":material/menu_book:")
         if not dict_entries:
             st.caption("Empty. PRISM still operates; add a formula below to govern one.")
+        else:
+            # Resetting is a demo operation, not an accident to guard
+            # against: the cold half of the two-pass story needs an empty
+            # dictionary, and deleting every entry one at a time to get
+            # there breaks the narrative mid-demo.
+            if st.button("Reset dictionary", icon=":material/restart_alt:",
+                        help="Empty this scope's dictionary to demonstrate the "
+                             "ungoverned path again. Equivalent to "
+                             "`manage.py reset-dictionary`."):
+                dictionary.clear(scope=scope)
+                st.session_state.pop("showcase_runs", None)
+                st.toast("Dictionary cleared — concepts are ungoverned again.",
+                        icon=":material/restart_alt:")
+                st.rerun()
         for entry in dict_entries:
             with st.container(border=True):
                 cols = st.columns([5, 1, 1])
