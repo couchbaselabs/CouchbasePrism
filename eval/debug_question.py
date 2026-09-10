@@ -1,7 +1,7 @@
 """Run ONE question through the full runtime and print every stage.
 
-    python -m eval.debug_question financebench_id_00807
-    python -m eval.debug_question financebench_id_00941 --chunks
+    python -m eval.debug_question 3m-2022-q3-quick-ratio
+    python -m eval.debug_question 3m-002 --chunks
 
 This is the tool for answering "why did that happen?" - it shows the resolved
 document, the evidence plan and its content anchors, which chunks the anchors
@@ -27,7 +27,7 @@ def rule(title: str) -> None:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("question_id")
-    ap.add_argument("--corpus", default="financebench")
+    ap.add_argument("--corpus", default="ftsprism")
     ap.add_argument("--chunks", action="store_true",
                     help="print full untruncated chunk text")
     ap.add_argument("--phase", default=phases.DEFAULT_PHASE,

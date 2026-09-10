@@ -1,6 +1,5 @@
 """Run a corpus of questions through the PRISM runtime and score the results.
 
-    python -m eval.run_benchmark --corpus financebench --company 3M
     python -m eval.run_benchmark --company 3M --out out/cold.json
 
 The dictionary is read from disk as-is, so "cold" and "warm" are not modes -
@@ -21,7 +20,7 @@ from prism import catalog, dictionary, runtime
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", default="financebench")
+    ap.add_argument("--corpus", default="ftsprism")
     ap.add_argument("--company", default=None, help="restrict to one company")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--phase", default=phases.DEFAULT_PHASE,

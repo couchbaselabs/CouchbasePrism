@@ -62,16 +62,13 @@ pip install -r requirements.txt
 cp local.example.yaml local.yaml   # fill in Capella, AI Data Plane, AWS, OpenAI
                                    # prism/config.py loads it directly - no
                                    # shell sourcing step needed
-
-
-git clone https://github.com/patronus-ai/financebench   # the test corpus
 ```
 
 ## Use
 
 ```bash
 # build the catalog for a corpus (one document per PDF)
-python manage.py build-catalog --corpus financebench --company 3M
+python manage.py build-catalog --company 3M
 
 # run the benchmark (3-hybrid, the preferred architecture, is the default)
 python -m eval.run_benchmark --company 3M --out out/cold.json
@@ -82,8 +79,8 @@ for p in 1-vector 2-catalog 3-hybrid; do
 done
 
 # inspect one question, every stage
-python -m eval.debug_question financebench_id_00807
-python -m eval.debug_question financebench_id_00941 --chunks
+python -m eval.debug_question 3m-2022-q3-quick-ratio
+python -m eval.debug_question 3m-002 --chunks
 
 # the governed correction — the entire human step
 python manage.py approve "quick ratio" \
@@ -121,20 +118,18 @@ to judge it.
 **Warm** — the same question is now governed: a single deterministic 0.9578 and
 an authorised verdict.
 
-On the 8 FinanceBench questions for 3M, convergence with FinanceBench's own
-conventions moved 25% (vector only) → 38% (catalog-scoped) → **62%** (hybrid,
-after one approved dictionary entry).
+Each architecture phase adds one layer, measured against the previous one:
 
-| Architecture | What it adds | Converged |
-|---|---|---|
-| `1-vector` | textbook RAG — kNN over the whole corpus | 25% (2/8) |
-| `2-catalog` | resolve the document first, then search inside it | 38% (3/8) |
-| `3-hybrid` | BM25 + content anchors + kNN via `SEARCH()`, plus binding, deterministic calculation and governance | **62%** (5/8) |
+| Architecture | What it adds |
+|---|---|
+| `1-vector` | textbook RAG — kNN over the whole corpus |
+| `2-catalog` | resolve the document first, then search inside it |
+| `3-hybrid` | BM25 + content anchors + kNN via `SEARCH()`, plus binding, deterministic calculation and governance |
 
-"Converged" is the honest word. Several quick-ratio and ROA conventions are
-defensible finance; FinanceBench expects particular ones. Reporting this as
-"62% correct" would assert exactly the objective truth PRISM is built not to
-assume.
+"Converged" is the honest word for what `eval.run_benchmark` reports. Several
+quick-ratio and ROA conventions are defensible finance; a gold answer picks
+one particular convention. Reporting a score as "correct" would assert
+exactly the objective truth PRISM is built not to assume.
 
 ## Layout
 
@@ -176,8 +171,8 @@ iteration kept five forked eval scripts and they drifted — a prompt fix applie
 to one silently failed to reach the others and cost a question that had been
 passing.
 
-FinanceBench is one test corpus, not the system. Nothing in `prism/` imports
-from `eval/`; a second suite is a new adapter under `eval/corpora/`.
+A corpus is a test suite, not the system. Nothing in `prism/` imports from
+`eval/`; a second corpus is a new adapter under `eval/corpora/`.
 
 ## Known limitations
 
@@ -192,25 +187,4 @@ from `eval/`; a second suite is a new adapter under `eval/corpora/`.
 
 ## License
 
-Apache License 2.0 — see [`LICENSE`](LICENSE).
-
-## Acknowledgement
-
-PRISM is evaluated against [FinanceBench](https://github.com/patronus-ai/financebench),
-an open-source benchmark for financial question answering. The corpus is not
-redistributed here — `financebench/` is gitignored and cloned separately. We use
-their PDFs and question/answer/evidence triples as input, and deliberately do
-*not* use their document metadata: PRISM builds its own catalog and is scored
-against theirs.
-
-
-```bibtex
-@misc{islam2023financebench,
-      title={FinanceBench: A New Benchmark for Financial Question Answering},
-      author={Pranab Islam and Anand Kannappan and Douwe Kiela and Rebecca Qian and Nino Scherrer and Bertie Vidgen},
-      year={2023},
-      eprint={2311.11944},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL}
-}
-```
+MIT — see [`LICENSE`](LICENSE).

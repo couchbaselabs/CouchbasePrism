@@ -1,6 +1,6 @@
 """Pure-logic tests for catalog resolution, date derivation, binding
 validation and conclusion agreement. Each case below corresponds to a bug that
-actually occurred during the FinanceBench evaluation."""
+actually occurred during real eval runs."""
 from prism import catalog, retrieval, runtime, trace
 from prism.catalog.extraction import _chunk_sort_key
 from prism.catalog.resolver import event_date_from_question, period_from_question

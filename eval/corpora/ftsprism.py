@@ -1,18 +1,15 @@
 """ftsPrism corpus adapter - PRISM's own open sample corpus.
 
-Same shape FinanceBench established (eval/corpora/financebench.py): a
-directory the adapter reads, not something baked into the package. The
-difference is what's IN it. Every PDF here is pulled directly from SEC EDGAR
-(public record - PRISM never redistributes a third party's compiled copy),
-and every question, gold answer and evidence excerpt is either authored by
-hand against the underlying filing or drafted by PRISM's own answer pipeline
-and then human-verified - never paraphrased or derived from FinanceBench's
-own compiled question set. See ftsprism/README.md for the full schema and
-how to add to it.
+A directory the adapter reads, not something baked into the package. Every
+PDF here is pulled directly from SEC EDGAR (public record - PRISM never
+redistributes a third party's compiled copy), and every question, gold
+answer and evidence excerpt is either authored by hand against the
+underlying filing or drafted by PRISM's own answer pipeline and then
+human-verified. See ftsprism/README.md for the full schema and how to add
+to it.
 
 Extra fields beyond the shared adapter interface (eval/corpora/__init__.py),
-all optional and absent from financebench.py's questions() - a consumer must
-tolerate their absence:
+all optional - a consumer must tolerate their absence:
     formula      the exact expression that produces expected_answer, or None
                  for a direct-extraction question. Identifier-based (e.g.
                  "(total_current_assets - inventory) / total_current_liabilities"),
@@ -74,7 +71,7 @@ def _load_question(path: pathlib.Path, doc_lookup: dict) -> dict:
 
 
 def questions(company: str = None, limit: int = None) -> list:
-    """Returns dicts with the same stable shape financebench.py returns
+    """Returns dicts with the shared adapter shape
     ({id, question, expected_answer, doc_name, company, evidence}), plus
     formula, concept, keywords and lineage. Files under questions/ whose name
     starts with "_" (the template) are never loaded as real questions."""
@@ -105,7 +102,7 @@ def documents(company: str = None) -> list:
 
 
 def sectors() -> dict:
-    """{doc_name: sector} from this corpus's own document metadata - same
-    reasoning as financebench.py's sectors(): not printed on any cover page,
-    so it cannot come from PRISM's own extraction."""
+    """{doc_name: sector} from this corpus's own document metadata - not
+    printed on any cover page, so it cannot come from PRISM's own
+    extraction."""
     return {d["doc_name"]: d["sector"] for d in _documents() if d.get("sector")}

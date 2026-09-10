@@ -1,8 +1,8 @@
 # Multi-period questions need more than one document
 
 **Status:** open design question, not a bug
-**Scale:** 14 of 143 answerable FinanceBench questions (~10%), the largest
-remaining class of resolution failures
+**Scale:** 14 of 143 answerable questions (~10%) in a multi-company eval
+corpus, the largest remaining class of resolution failures
 
 ## The shape of it
 

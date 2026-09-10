@@ -8,9 +8,9 @@ Two paths, because they answer different questions:
 
 A note on language: "pass" here means CONVERGED WITH THE CORPUS'S CHOSEN
 CONVENTION, not "objectively correct". Several quick-ratio and ROA conventions
-are defensible finance; FinanceBench expects particular ones. Reporting a score
-as "62% correct" would assert exactly the objective truth PRISM is built not to
-assume.
+are defensible finance; the gold answer picks one particular convention.
+Reporting a score as "62% correct" would assert exactly the objective truth
+PRISM is built not to assume.
 """
 import re
 

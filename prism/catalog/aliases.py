@@ -5,7 +5,7 @@ document name's own prefix. Between them those cover abbreviations that are
 prefixes of the full name - "JPM" for JPMorgan Chase, "MGM" for MGM Resorts
 International. They cannot cover the rest: "JnJ" is not a prefix of JOHNSON &
 JOHNSON, and "AMEX" is not a prefix of AMERICAN EXPRESS. Those accounted for 9 of
-21 subject failures on the FinanceBench question set.
+21 subject-resolution failures measured across a multi-company eval corpus.
 
 This is the one place a model is asked for knowledge rather than for a reading of
 a document, so it is deliberately narrow:

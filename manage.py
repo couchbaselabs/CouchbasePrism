@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Operator commands.
 
-    python manage.py build-catalog --corpus financebench --company 3M
+    python manage.py build-catalog --company 3M
     python manage.py approve "quick ratio" \
         --formula "(total_current_assets - inventory) / total_current_liabilities" \
         --healthy-at-or-above 1.0
@@ -215,7 +215,7 @@ def main():
     b = sub.add_parser("build-catalog")
     b.add_argument("--all", action="store_true",
                    help="catalog every PDF, including ones with no chunks ingested")
-    b.add_argument("--corpus", default="financebench")
+    b.add_argument("--corpus", default="ftsprism")
     b.add_argument("--company", default=None)
     b.add_argument("--model", default=None)
     b.set_defaults(func=build_catalog)
@@ -251,7 +251,7 @@ def main():
 
     i = sub.add_parser("initialize", help="empty+rebuild catalog and dictionary, "
                                           "rebuild the search index (destructive)")
-    i.add_argument("--corpus", default="financebench")
+    i.add_argument("--corpus", default="ftsprism")
     i.add_argument("--model", default=None)
     i.add_argument("--yes", action="store_true", help="skip confirmation")
     i.set_defaults(func=initialize)

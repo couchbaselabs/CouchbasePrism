@@ -34,18 +34,18 @@ right raw facts, produces confidently divergent answers — because common
 financial ratios have multiple genuinely defensible conventions. Confirmed
 directly, twice, on real 3M filings:
 
-- **Quick ratio** (`financebench_id_00807`, 3M 2023 Q2 10-Q): FinanceBench
-  expects `(current_assets − inventory) / current_liabilities = 0.96`. An
+- **Quick ratio** (3M 2023 Q2 10-Q): the gold answer expects
+  `(current_assets − inventory) / current_liabilities = 0.96`. An
   ungoverned compute step produced `0.85` (cash + marketable securities +
   receivables, over liabilities) and `0.90` (current assets less inventory
   *and* prepaids) instead.
-- **Return on assets** (`financebench_id_00499`, 3M 2022 10-K):
+- **Return on assets** (3M 2022 10-K):
   `net income attributable to 3M / total assets` = 12.44%, matching the
   expected 12.4%; `net income including noncontrolling interest / total assets`
   = 12.47%, rounding to 12.5%, which would not match.
 
 Every one of those alternatives is defensible finance. They are not errors and
-0.96 is not objectively "correct" — it is the convention *this benchmark*
+0.96 is not objectively "correct" — it is the convention *this gold answer*
 expects. That is the entire point: the value PRISM adds is acknowledging and
 governing the ambiguity, not resolving it by fiat.
 
@@ -83,6 +83,6 @@ sharpens from actual use rather than speculative authoring.
   re-trigger ambiguity rather than silently inherit the wrong entry.
 - **This ADR assumes retrieval reliably finds the right facts once a concept is
   identified. It does not yet.** `meta-data.associated-titles` was wrong on 3
-  of 3 checked cases (`financebench_id_01226`, `financebench_id_01865`,
-  `financebench_id_00941`). Content-anchor planning mitigates this; it is
-  tracked separately as an open issue in `design/architecture.md` §7.
+  of 3 checked cases (see `docs/findings/associated-titles-defect.md`).
+  Content-anchor planning mitigates this; it is tracked separately as an open
+  issue in `design/architecture.md` §7.

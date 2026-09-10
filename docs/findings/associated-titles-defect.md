@@ -2,7 +2,7 @@
 
 **Component:** Couchbase AI Data Plane, Unstructured Data Workflow
 **Not a docling defect** — docling's output is correct; see "Docling is correct" below.
-**Source:** 3M 2022 10-K (FinanceBench), ingested to `acme.prism.docs`
+**Source:** 3M 2022 10-K, ingested to `acme.prism.docs`
 
 ## Summary
 
@@ -57,15 +57,14 @@ Section Title: Goodwill Impairment Expense: Content: | (Percent of net sales) | 
 ```
 
 The wrong heading is therefore embedded into the vector, steering it away from
-the table's actual subject. Measured effect on this chunk, which contains the
-answer to FinanceBench `financebench_id_01226` (3M FY2022 operating margin,
-`19.1% / 20.8% / (1.7)%`):
+the table's actual subject. Measured effect on this chunk, which contains
+3M's FY2022 operating margin (`19.1% / 20.8% / (1.7)%`):
 
 - **Vector rank 81 of 730** chunks within its own filing.
 - Simultaneously the **single best BM25 hit** in that filing for the query.
 
 A retrieval configuration relying on the vector channel alone does not reach
-it. Recall@10 against FinanceBench's annotated evidence pages is 0.54 with
+it. Recall@10 against an annotated evidence-page benchmark is 0.54 with
 score-fused hybrid search and 0.67 once the lexical channel is given an
 independent quota — the difference is this chunk.
 
@@ -75,7 +74,7 @@ independent quota — the difference is this chunk.
 | Trading Symbol(s) | Name of each exchange on which registered`, containing
 `MMM26`, `MMM30`, `MMM31`) is assigned `associated-titles: ['Delaware',
 '41-0417775']` — the state of incorporation and the IRS Employer
-Identification Number. This is the evidence for `financebench_id_00941`.
+Identification Number, not the table's actual subject.
 
 ## Related: document-level title
 

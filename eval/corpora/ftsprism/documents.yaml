@@ -2,10 +2,9 @@
 # itself belong here - company, doc_type, and period end date come from
 # PRISM's own catalog extraction (prism/catalog/extraction.py) and are
 # scored against, not hand-supplied. `company` below is the one exception,
-# and it stays unscored on purpose: it's read only as a --company filter
-# (matching financebench.py's own questions(company=...) argument), never
-# compared against what extraction produces. `sector` is the same story as
-# financebench.py's sectors() - it isn't printed on any cover page, so it
+# and it stays unscored on purpose: it's read only as the adapter's own
+# --company filter, never compared against what extraction produces.
+# `sector` is the same story - it isn't printed on any cover page, so it
 # cannot come from extraction either way.
 #
 # doc_name     matches the PDF's filename (without .pdf) under pdfs/{company}/

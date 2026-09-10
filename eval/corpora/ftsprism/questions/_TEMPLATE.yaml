@@ -9,10 +9,8 @@
 doc_name: EXAMPLE_2022_10K        # must match an entry in ../documents.yaml
 
 question: >
-  Write an ORIGINAL question in your own words - do not paraphrase a
-  FinanceBench question, even one in the same category. Facts and plain
-  phrasing ("what was X's metric Y for period Z") aren't the risk; copying
-  their specific wording is what to avoid.
+  Write an ORIGINAL question in your own words, drafted directly against
+  the filing itself - not paraphrased from anywhere else.
 
 concept: null                      # e.g. "quick_ratio" when this question is
                                     # answered by a formula that also has a

@@ -10,8 +10,10 @@ local.yaml
 # Dictionary is environment/customer state, not source
 dictionary.yaml
 
-# Cloned benchmark corpus — 1.2GB and its own git repo.
-# git clone https://github.com/patronus-ai/financebench
+# A local checkout some machines still have from before this project moved to
+# its own ftsPrism corpus - not referenced by any code, but present on disk
+# and must never be accidentally staged/committed (it's a large third-party
+# dataset with no redistribution license).
 financebench/
 
 # Python

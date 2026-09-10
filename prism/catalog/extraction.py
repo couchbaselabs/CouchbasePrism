@@ -180,9 +180,9 @@ def period_from_doc_name(doc_name: str):
 
     8-Ks and earnings releases carry no "for the fiscal year ended" line, so
     extraction leaves doc_period empty and they never match a period-bearing
-    question - a 10-K wins by default. 12 of the FinanceBench resolution
-    failures were exactly this. The document name carries the year, so it is used
-    as a fallback and recorded as such.
+    question - a 10-K wins by default. 12 of a multi-company eval corpus's
+    resolution failures were exactly this. The document name carries the
+    year, so it is used as a fallback and recorded as such.
     """
     match = _NAME_PERIOD.search(doc_name or "")
     return int(match.group(1)) if match else None

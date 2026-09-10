@@ -173,14 +173,14 @@ _QUARTER_WORD_PATTERN = re.compile(
 
 
 def period_from_question(question: str):
-    """"Q3" and "third quarter" are the same fact, worded two ways - FinanceBench's
-    own questions apparently only ever use the "Q2 2023" shorthand, which is
-    why this gap went unnoticed there. A hand-authored question asking
-    naturally ("the third quarter of 2022") is exactly the phrasing a real
-    person uses, and resolve() silently fell through to the annual filing
-    whenever this returned None instead of an actual quarter - a real
-    document, confidently wrong, the same failure shape as the FY-range bug
-    below."""
+    """"Q3" and "third quarter" are the same fact, worded two ways - the
+    machine-generated eval corpus this was first built against apparently
+    only ever used the "Q2 2023" shorthand, which is why this gap went
+    unnoticed there. A hand-authored question asking naturally ("the third
+    quarter of 2022") is exactly the phrasing a real person uses, and
+    resolve() silently fell through to the annual filing whenever this
+    returned None instead of an actual quarter - a real document,
+    confidently wrong, the same failure shape as the FY-range bug below."""
     quarter = None
     m = re.search(r"\bQ([1-4])\b", question, re.IGNORECASE)
     if m:

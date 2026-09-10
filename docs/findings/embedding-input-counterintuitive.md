@@ -1,7 +1,7 @@
 # The raw question embeds better than any distilled version of it
 
 **Status:** measured, closed - kept the current behaviour
-**Scale:** tested across all 143 answerable FinanceBench questions
+**Scale:** tested across all 143 answerable questions in a multi-company eval corpus
 
 ## The intuition that turned out wrong
 
@@ -55,8 +55,8 @@ question's framing genuinely is noise. That pattern inverts once the other
 
 ## A sharper, still-unresolved surprise
 
-On `financebench_id_00807` ("Does 3M have a reasonably healthy liquidity
-profile based on its quick ratio for Q2 of FY2023?"), none of the literal
+On "Does 3M have a reasonably healthy liquidity
+profile based on its quick ratio for Q2 of FY2023?", none of the literal
 words - "healthy", "liquidity", "profile", "quick ratio" - appear anywhere
 in the gold table (a balance sheet: "Total current assets", "Total current
 liabilities", "Cash and cash equivalents"). Embedding just the two words

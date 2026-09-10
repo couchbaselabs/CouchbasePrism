@@ -1,7 +1,7 @@
 # PRISM architecture — three-tier model
 
-Status: living document, reflects the state reached via the FinanceBench evaluation
-work (2026-08-06 through 2026-08-11) and the architecture review of 2026-08-11.
+Status: living document, reflects the state reached via internal eval work
+(2026-08-06 through 2026-08-11) and the architecture review of 2026-08-11.
 Supersedes `design/archive/catalog_document.md`, whose single-collection model has
 since split into three tiers with distinct purposes and distinct names. Decisions
 recorded here that are hard to reverse get their own ADR under `docs/adr/`; this
@@ -18,7 +18,7 @@ colliding in conversation.
 
 | Name | Grain | Answers | How it's populated | Status |
 |---|---|---|---|---|
-| **`catalog`** | one per source document | "which document is this?" (company, doc type, period) | extracted at ingestion | Built, validated on a 50-doc FinanceBench sample |
+| **`catalog`** | one per source document | "which document is this?" (company, doc type, period) | extracted at ingestion | Built, validated on a 50-document sample |
 | **`docs`** | one per chunk | "what does the document say, here?" (text, embedding, page, section title) | chunked + embedded at ingestion | Built via Couchbase AI Data Plane Unstructured Data Workflow |
 | **`dictionary`** | one per domain concept | "how is this concept defined, and who says so?" (formula, interpretation policy, recognition terms) | **model-proposed from real use, human-approved when consequential** | Designed (ADR-0001), not yet built |
 
@@ -105,7 +105,7 @@ already-known concepts, not the only way in.
 ## 2. Tier 1 — Catalog
 
 One document per PDF. Current schema (validated): `doc_name` (join key,
-FinanceBench's own `{COMPANY}_{PERIOD}_{TYPE}` convention), `company`,
+a `{COMPANY}_{PERIOD}_{TYPE}` convention), `company`,
 `doc_type`, `period_end_date` (verbatim, citable), `period_end_date_iso`
 (derived, for FTS date-range queries — never overwrites the verbatim value).
 Each field carries `{value, confidence, source, source_span, page}` —
@@ -118,7 +118,7 @@ cover-page text; OpenAI closed-set classification extracts the four fields;
 regex alone matches OpenAI on `doc_type`/`doc_period` (both are structurally
 fixed-vocabulary problems) but not `company` (17% miss rate — company names
 aren't a fixed-vocabulary problem the way "FORM 10-K" is). Validated at 100%
-agreement with FinanceBench's own document metadata on a 50-document sample.
+agreement with independently-verified document metadata on a 50-document sample.
 
 `sort=True` matters because PyMuPDF's default text order follows the PDF's
 content stream, not visual position — on some filings (Activision's 2015
@@ -137,12 +137,12 @@ Ingested via Couchbase's AI Data Plane Unstructured Data Workflow: PDFs in S3
 
 **Known reliability issue, confirmed 3 times, not a one-off**:
 `meta-data.associated-titles` is wrong on a meaningful fraction of table
-chunks — not missing, *wrong*: financebench_id_01226's operating-margin table,
-financebench_id_00941's debt-securities table (titled `["Delaware",
-"41-0417775"]`), and financebench_id_01865's Consumer-segment table
-(mislabeled "PERFORMANCE BY GEOGRAPHIC AREA") all carry titles describing
-something else on the page. Any retrieval strategy that trusts this field
-inherits the failure silently.
+chunks — not missing, *wrong*: a 3M operating-margin table, a debt-securities
+table (titled `["Delaware", "41-0417775"]`), and a Consumer-segment table
+(mislabeled "PERFORMANCE BY GEOGRAPHIC AREA") all carried titles describing
+something else on the page (see `docs/findings/associated-titles-defect.md`
+for the full detail on one of these). Any retrieval strategy that trusts this
+field inherits the failure silently.
 
 The evidence planner (§1) is the primary mitigation: a plan that specifies
 **content anchors** — row labels that must appear verbatim in the right table,
@@ -172,19 +172,19 @@ retrieved raw facts. Retrieval can find the facts; it cannot decide which of
 several genuinely defensible conventions is the one a given
 benchmark/customer/analyst means. Confirmed directly, twice:
 
-| Metric | Matches FinanceBench's convention | Other defensible conventions, same retrieved facts |
+| Metric | Matches the gold answer's convention | Other defensible conventions, same retrieved facts |
 |---|---|---|
-| Quick ratio (financebench_id_00807) | `(current_assets − inventory) / current_liabilities` = **0.96** | `(cash + securities + receivables) / current_liabilities` = 0.85; `(current_assets − inventory − prepaids) / current_liabilities` = 0.90 |
-| Return on assets (financebench_id_00499) | `net_income_attributable_to_3M / total_assets` = **12.44% ≈ 12.4%** | `net_income_including_NCI / total_assets` = 12.47% ≈ 12.5% |
+| Quick ratio | `(current_assets − inventory) / current_liabilities` = **0.96** | `(cash + securities + receivables) / current_liabilities` = 0.85; `(current_assets − inventory − prepaids) / current_liabilities` = 0.90 |
+| Return on assets | `net_income_attributable_to_3M / total_assets` = **12.44% ≈ 12.4%** | `net_income_including_NCI / total_assets` = 12.47% ≈ 12.5% |
 
 **Note the column heading.** These are not "correct" values and the
 alternatives are not errors — every listed convention is defensible finance.
-0.96 is what *FinanceBench expects*; a different organization could reasonably
-approve 0.90 and be equally right. PRISM's value is precisely in
+0.96 is what *the gold answer expects*; a different organization could
+reasonably approve 0.90 and be equally right. PRISM's value is precisely in
 acknowledging and governing that ambiguity, so the documentation must not
 quietly assert an objective truth the system is built to not assume. The same
 discipline applies to how eval results are reported: a "38% pass rate" means
-38% converged with FinanceBench's chosen conventions, not that 38% were
+38% converged with the gold answers' chosen conventions, not that 38% were
 objectively right.
 
 In both cases retrieval was clean and the correct raw facts were all present
@@ -235,7 +235,7 @@ approved `interpretation_policy` exists, the honest behavior is to report the
 computed value with its provenance and decline the verdict — or surface a
 candidate policy ("the conventional threshold is 1.0; no approved policy
 exists for this context") into the same proposal/approval loop. This directly
-affects most of the FinanceBench questions in scope, which ask for judgments
+affects most of the eval questions in scope, which ask for judgments
 ("is 3M capital-intensive?", "reasonably healthy liquidity?"), not numbers.
 
 **`required_facts` is a list of plain names, not references.** They are
@@ -282,15 +282,15 @@ approved interpretation policy to judge against (§4.2).
 
 ## 5. Retrieval architecture — three phases, evaluated
 
-All phases scoped to 3M's 9 filings, 8 matching FinanceBench questions, scored
+All phases scoped to 3M's 9 filings, 8 matching eval questions, scored
 with an LLM judge (bare-numeric expected answers use deterministic comparison
 instead — free, unambiguous, no reason to route those through a judge).
 
-| Phase | Mechanism | Convergence with FinanceBench |
+| Phase | Mechanism | Convergence |
 |---|---|---|
 | `1-vector` | Hyperscale Vector Index, `APPROX_VECTOR_DISTANCE`, no filter. Textbook RAG. | 25% (2/8) |
 | `2-catalog` | regex resolves `doc_name` from question year/quarter (8/8 correct) against `catalog`, then vector search restricted to that document | 38% (3/8) |
-| `3-hybrid` | document scope + BM25 over content anchors + kNN, all in **one** `SEARCH()` against the `ftsFinanceBench` Search Vector Index, plus fact binding, deterministic calculation and dictionary governance | **62% (5/8)** |
+| `3-hybrid` | document scope + BM25 over content anchors + kNN, all in **one** `SEARCH()` against the docs Search Vector Index, plus fact binding, deterministic calculation and dictionary governance | **62% (5/8)** |
 
 Every configuration issues exactly **one** SQL++ statement. In `3-hybrid` the
 three legs are parts of a single `SEARCH()`:
@@ -388,10 +388,10 @@ sidestepped by content anchors instead.
 
 ## Appendix — key locations
 
-- Eval scripts: `docling_probe/financebench_rag_eval*.py`, `financebench_catalog_*.py`
+- Eval scripts: `eval/run_benchmark.py`, `eval/debug_question.py`
 - Catalog collection: `{bucket}.{scope}.catalog`; chunks: `{bucket}.{scope}.docs`
-- FTS indexes: `{bucket}.{scope}.ftsFinanceBench` (docs, hybrid),
-  `{bucket}.{scope}.ftsFinanceBenchCatalog` (catalog) — **must be
-  fully-qualified** in N1QL `SEARCH()` calls, the bare short name fails
+- FTS indexes: one docs index and one catalog index per domain scope (see
+  `design/domains.yaml`) — **must be fully-qualified** in N1QL `SEARCH()`
+  calls, the bare short name fails
 - S3 object naming: `{AWS_BUCKET}_{AWS_FOLDER}_{doc_name}.pdf`
 - ADRs: `docs/adr/`

@@ -59,9 +59,9 @@ def test_bm25_matches_the_merged_term_bag_not_the_question():
     # Sending the raw prompt scores mostly on common words and measurably
     # bought nothing. Concept + anchors are lowercased, split on punctuation,
     # deduped and OR-matched as one bag - not sent as match_phrase per anchor,
-    # which was tried and measured WORSE (financebench_id_10420: exact-phrase
-    # anchors matched MORE pages that legitimately print the same caption
-    # elsewhere in the filing, not the right one - see hybrid_search.py).
+    # which was tried and measured WORSE: exact-phrase anchors matched MORE
+    # pages that legitimately print the same caption elsewhere in the
+    # filing, not the right one - see hybrid_search.py.
     statement, params = build_statement("Does 3M have a healthy liquidity profile?",
                                         VEC, "3M_2023Q2_10Q", ANCHORS)
     disjuncts = search_object(statement)["query"]["conjuncts"][1]["disjuncts"]

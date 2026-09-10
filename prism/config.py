@@ -285,13 +285,14 @@ KNN_CANDIDATES = 200
 # "native-rrf"  Couchbase native reciprocal rank fusion, server-side, one
 #               statement. Requires 8.1 (or the 8.0/7.6 backport). On 8.0.1 the
 #               `score` field PARSED AND WAS IGNORED, which looks exactly like
-#               success - verify with the checks in infra/README.md.
+#               success - verify live against the cluster version in use
+#               rather than trusting the field is honoured.
 # "native-rsf"  Native relative score fusion.
 # "native-dbsf" Native distribution-based score fusion.
 # "rrf"         Our own: two SEARCH channels unioned in one statement, merged in
 #               code. Kept because it works on any version and because it
 #               reports each channel's rank and contribution per chunk.
-# Measured over 143 questions against FinanceBench's annotated evidence pages:
+# Measured over 143 questions against an annotated evidence-page benchmark:
 # sum, native-rrf, native-rsf and our in-code rrf are indistinguishable on
 # recall (0.58-0.60 resolved, 0.81-0.85 with the document forced). Fusion
 # strategy is not a quality lever on this corpus. native-rrf is the default

@@ -3,15 +3,11 @@
 PRISM's own open sample corpus - small on purpose, expandable on purpose,
 built to carry zero licensing doubt rather than manage some.
 
-## Why this exists, not just FinanceBench
+## Why this exists
 
-PRISM is evaluated against [FinanceBench](https://github.com/patronus-ai/financebench)
-internally, and that stays exactly as it is today - gitignored, cloned
-separately, used to compare against a published benchmark. But FinanceBench
-is a third party's compiled dataset with no formal license, only a citation
-request, and PRISM's public/GTM story shouldn't carry that dependency at all.
-ftsPrism is what the public demo, the field-enablement kit, and any Docker
-image run on instead.
+PRISM's public/GTM story needed a corpus with zero licensing doubt to
+manage, not one to manage carefully - ftsPrism is what the public demo, the
+field-enablement kit, and the Docker image all run on.
 
 **Every piece of it is sourced or authored so there is no doubt to manage:**
 
@@ -19,13 +15,12 @@ image run on instead.
   public record, filed under legal disclosure requirements, not a copy of
   anyone's compiled dataset. `documents.yaml` records the exact filing URL
   each PDF came from.
-- **Questions** are written in our own words. The category (e.g. "what was
-  metric Y for period Z") can echo FinanceBench's; the specific wording never
-  does.
+- **Questions** are written in our own words, drafted directly against the
+  filing itself.
 - **Gold answers and evidence** are facts and short verbatim quotes from the
   filing itself - not reproductions of a third party's annotation of it.
 
-Apache 2.0, same as the rest of this repo - see the root [`LICENSE`](../../../LICENSE).
+MIT, same as the rest of this repo - see the root [`LICENSE`](../../../LICENSE).
 
 ## Layout
 

@@ -204,27 +204,19 @@ def load_catalog(scope: str):
 
 @st.cache_data(show_spinner=False)
 def load_questions():
-    # ftsprism, not financebench - the demo runs on PRISM's own open corpus
-    # now; FinanceBench stays available for eval.run_benchmark's internal
-    # comparison, but has no place in the public-facing "Ask a question" tab.
+    # PRISM's own open corpus - the demo runs on this, not whatever internal
+    # eval corpora eval.run_benchmark may also support.
     return load_corpus("ftsprism").questions()
 
 
 def all_sectors() -> dict:
-    """{doc_name: gics_sector} merged across every corpus that's actually
-    present locally - not just financebench's. financebench/ is gitignored
-    and cloned separately, so a self-contained checkout (ftsprism's whole
-    point) legitimately might not have it; sectors() there opens a file
-    unconditionally and would raise on a clean checkout that never cloned
-    it. ftsprism's own sectors always merge in on top since it ships in the
-    repo itself."""
-    merged = {}
-    for name in ("financebench", "ftsprism"):
-        try:
-            merged.update(load_corpus(name).sectors())
-        except OSError:
-            pass
-    return merged
+    """{doc_name: gics_sector} from ftsprism's own document metadata - it
+    ships in the repo itself, so this is always present on a self-contained
+    checkout."""
+    try:
+        return load_corpus("ftsprism").sectors()
+    except OSError:
+        return {}
 
 
 def company_catalog(catalog_docs: list, company: str) -> list:
@@ -421,7 +413,7 @@ def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
         result = runtime.answer_question(
             question["question"], company_catalog(catalog_docs, question["company"]),
             dictionary_data, options=options, model=model, scope=scope)
-        # A custom question has no FinanceBench reference to judge against -
+        # A custom question has no gold reference to judge against -
         # question["expected_answer"] is display text for the UI, not data a
         # judge call should ever see.
         verdict = ({"passed": None, "method": "unscored",
@@ -836,7 +828,7 @@ def results_table_html(runs: list) -> str:
         cells = [
             f'<td><span class="prism-pill" style="background:{colour}">{label}</span>'
             f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
-            f'{html.escape(q["id"].replace("financebench_id_", "#"))}</div></td>',
+            f'{html.escape(q["id"])}</div></td>',
             f'<td>{_md_bold(q["question"])}</td>',
             f'<td>{_md_bold(q["expected_answer"])}</td>',
             f'<td>{_md_bold(result["answer"])}</td>',
@@ -908,7 +900,7 @@ def render_batch(runs: list, scope: str, phase: str, model: str):
             ":material/manage_search:")
     options = {
         f"{'✅' if r['verdict']['passed'] else '❌'}  "
-        f"{r['question']['id'].replace('financebench_id_', '#')} · "
+        f"{r['question']['id']} · "
         f"{r['question']['question'][:70]}": r
         for r in runs
     }
