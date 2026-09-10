@@ -10,11 +10,33 @@ from .. import llm
 from .fact_binding import format_chunks
 
 PLAIN_PROSE_RULE = (
-    "Write in plain prose - no markdown bold, italics, or other emphasis markup. "
+    "Do not use markdown bold, italics, or other emphasis markup. "
     "Models tend to wrap numbers in **bold** with no surrounding space, which some "
     "renderers show as words running together with no space (e.g. \"3,404**million**\" "
     "- verified live, this is a real rendering and copy-paste corruption, not a "
-    "cosmetic nitpick) - plain text has no such failure mode."
+    "cosmetic nitpick) - plain text has no such failure mode. This is about emphasis "
+    "markup specifically, not about banning lists - an earlier \"write in plain prose\" "
+    "framing read as the latter too, which is a live source of enumerated answers "
+    "getting buried in a sentence instead of listed (see STRUCTURE_RULE)."
+)
+
+STRUCTURE_RULE = (
+    "When the question asks for an enumeration and the source presents it as table "
+    "rows, list one item per line instead of burying them in a sentence; otherwise "
+    "answer in ordinary prose. Three things matter beyond appearance:\n"
+    "- Use the source's own printed row labels verbatim (\"Nontaxable or nondeductible "
+    "items\", not \"non-deductible expenses\") - this is what makes an answer "
+    "auditable line-by-line against the filing.\n"
+    "- Keep every column the source shows for those rows (e.g. both the percent and "
+    "the dollar amount) rather than silently picking one.\n"
+    "- Never drop rows to shorten a list. If the question's own wording invites a "
+    "subset (\"largest\", \"main\", \"primary\", \"key\"), say explicitly that the list "
+    "is a subset and what criterion was applied - verified live, asking for the "
+    "\"largest\" reconciling items in 3M's effective-tax-rate table silently dropped "
+    "the smallest ones below an unstated cutoff, with nothing in the answer disclosing "
+    "that a subset was applied or what decided it; the listed items then no longer "
+    "summed to the stated rate, which is invisible to a casual reader. Asking for the "
+    "items with no qualifier returned all nine rows correctly."
 )
 
 CURRENCY_RULE = (
@@ -31,7 +53,7 @@ BASE_ANSWER_PROMPT = (
     "source for a specific quantitative answer. When a question asks for a value, a "
     "rate, or what drove a change, check [TABLE] sources first and prefer their figures "
     "over a narrative source's paraphrase.\n\n"
-    f"{PLAIN_PROSE_RULE}\n\n{CURRENCY_RULE}"
+    f"{PLAIN_PROSE_RULE}\n\n{CURRENCY_RULE}\n\n{STRUCTURE_RULE}"
 )
 
 COMPUTED_ANSWER_PROMPT = (
