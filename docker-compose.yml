@@ -1,0 +1,13 @@
+# No auth gate, no TLS/reverse-proxy container - PRISM is a POC/demo/
+# learning reference architecture, not a product where those are load-
+# bearing. config.yaml is the only thing mounted in; everything else lives
+# in the image already (see Dockerfile).
+services:
+  prism:
+    image: ghcr.io/couchbaselabs/couchbaseprism:${PRISM_VERSION:-latest}
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped

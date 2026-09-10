@@ -55,6 +55,23 @@ computing and only binds facts and writes prose. That switch is what makes
 
 ## Setup
 
+Docker is the only prerequisite for running PRISM - the image bundles Python
+and every dependency, nothing else to install on the host.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/couchbaselabs/CouchbasePrism/main/config.example.yaml -o config.yaml
+$EDITOR config.yaml   # fill in Capella, AI Data Plane, AWS, OpenAI, domains
+
+curl -sSL https://raw.githubusercontent.com/couchbaselabs/CouchbasePrism/main/install.sh | bash -s -- ./config.yaml
+# → http://localhost:8501
+```
+
+`config.yaml` is mounted into the container at runtime, never baked into the
+image - the image is on a public registry, and it should never carry your
+secrets. Re-run the same `install.sh` line to pull a newer version.
+
+For development, run from a checkout instead:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -62,6 +79,9 @@ pip install -r requirements.txt
 cp config.example.yaml config.yaml   # fill in Capella, AI Data Plane, AWS,
                                      # OpenAI and your domains - one file,
                                      # prism/config.py loads it directly
+
+# or, with Docker, from the same checkout:
+docker compose up --build
 ```
 
 ## Use

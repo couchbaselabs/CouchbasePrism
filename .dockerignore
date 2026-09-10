@@ -1,0 +1,42 @@
+# Secrets - never let these into the build context, let alone the image.
+# config.yaml is mounted at container RUNTIME (see docker-compose.yml),
+# never baked in at build time - the image ends up on a public registry.
+config.yaml
+*.pem
+*.key
+
+# Runtime/environment state, not source - same reasoning as .gitignore.
+dictionary.yaml
+
+# Never send this into a build context - large third-party dataset with no
+# redistribution license, and irrelevant to the packaged app either way.
+financebench/
+
+# Internal design docs - not part of the shipped product.
+internal/
+
+# Python
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Run output / scratch
+out/
+file.json
+file.md
+
+# OS / editor / VCS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.git/
+.gitignore
+
+# Streamlit-generated symlinks (see .gitignore's own note - these dangle
+# outside the machine that created them)
+.agents/
+.claude/skills/
