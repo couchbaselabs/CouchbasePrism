@@ -10,6 +10,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 CONFIG_PATH = REPO_ROOT / "config.yaml"
 
+# One file, bumped by hand each release - read by the Streamlit footer and
+# by the Docker build (for image tagging). Not a Python package version
+# (no setup.py/pyproject to sync it with); this is a deployable app, not a
+# library, so a plain text file is the whole mechanism.
+VERSION = (REPO_ROOT / "VERSION").read_text().strip()
+
 # config.yaml's own field names -> the environment variable names this
 # codebase has always read (couchbase_host()/EMBED_ENDPOINT/etc. below don't
 # change at all - only how the values get there does). One file, not two:

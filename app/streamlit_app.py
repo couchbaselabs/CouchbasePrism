@@ -1173,7 +1173,7 @@ with st.sidebar:
     with brand:
         st.image(PRISM_MARK, width=68)
         with st.container(gap=None):
-            st.markdown("### Couchbase Prism")
+            st.markdown(f"### Couchbase Prism `v{config.VERSION}`")
             st.caption("Governed retrieval that works immediately—and learns from reviewed use")
 
     st.space("small")
