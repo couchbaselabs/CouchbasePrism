@@ -18,7 +18,6 @@ import os
 
 DEFAULTS = {
     "AWS_BUCKET": "test-bucket",
-    "AWS_FOLDER": "test-folder",
     "COUCHBASE_CONN_STRING": "couchbases://test.invalid",
     "COUCHBASE_USERNAME": "test-user",
     "COUCHBASE_PASSWORD": "test-pass",

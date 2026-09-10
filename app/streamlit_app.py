@@ -1180,7 +1180,7 @@ with st.sidebar:
     st.markdown("### Run configuration")
     # "Company" doesn't apply anymore - this is a single-company installation
     # (3M today; a future scope is still 3M, just a different corpus - see
-    # design/domains.yaml). The axis that actually varies is which domain
+    # config.yaml). The axis that actually varies is which domain
     # (Couchbase scope) to operate in.
     scope_options = sorted(config.DOMAINS)
     scope = st.selectbox(
@@ -1312,9 +1312,10 @@ with tab_setup:
             caption="Straight upload, no S3 object metadata, no per-company "
                     "subfolder - flat into the one folder below, matching what "
                     "the ingestion workflow and config.source_filename() both "
-                    "expect. Bucket/folder/region come from .env, the same "
-                    "values retrieval uses - not re-typed here, so they can't "
-                    "drift out of sync with each other. Credentials are used "
+                    "expect. Bucket/region come from config.yaml's aws: "
+                    "section, folder from the selected scope's domain entry - "
+                    "the same values retrieval uses, not re-typed here, so "
+                    "they can't drift out of sync with each other. Credentials are used "
                     "for this upload only - never written to disk, a config "
                     "file, or session state beyond the click that submits them.")
     pdf_root = REPO_ROOT / "eval" / "corpora" / "ftsprism" / "pdfs"
@@ -1323,16 +1324,16 @@ with tab_setup:
     for company, path in available:
         by_company.setdefault(company, []).append(path)
     s3_bucket_env = os.environ.get("AWS_BUCKET")
-    s3_folder_env = os.environ.get("AWS_FOLDER")
+    s3_folder = config.domain_for(scope).aws_folder
     if not available:
         st.info(f"No PDFs found under {pdf_root} yet.", icon=":material/info:")
-    elif not (s3_bucket_env and s3_folder_env):
-        st.error("AWS_BUCKET and AWS_FOLDER must be set in .env before "
-                 "uploading - see .env.example.", icon=":material/error:")
+    elif not s3_bucket_env:
+        st.error("aws.bucket must be set in config.yaml before uploading - "
+                 "see config.example.yaml.", icon=":material/error:")
     else:
         st.caption(", ".join(f"{c} ({len(p)})" for c, p in sorted(by_company.items()))
                   + f" — {len(available)} PDF(s) total, uploading flat to "
-                    f"s3://{s3_bucket_env}/{s3_folder_env.strip('/')}/")
+                    f"s3://{s3_bucket_env}/{s3_folder.strip('/')}/")
         with st.form("s3_upload_form"):
             s3_access_key = st.text_input("AWS access key ID", type="password")
             s3_secret_key = st.text_input("AWS secret access key", type="password")
@@ -1357,7 +1358,7 @@ with tab_setup:
                 result = s3_upload.upload_pdfs(
                     pdf_root, access_key=s3_access_key, secret_key=s3_secret_key,
                     session_token=s3_session_token.strip() or None,
-                    on_progress=on_s3_progress)
+                    scope=scope, on_progress=on_s3_progress)
                 if result["failed"]:
                     st.warning(f"{len(result['uploaded'])}/{len(available)} uploaded, "
                               f"{len(result['failed'])} failed.")
@@ -1365,7 +1366,7 @@ with tab_setup:
                                       for f in result["failed"]))
                 else:
                     st.success(f"{len(result['uploaded'])}/{len(available)} PDF(s) "
-                              f"uploaded to s3://{s3_bucket_env}/{s3_folder_env.strip('/')}/")
+                              f"uploaded to s3://{s3_bucket_env}/{s3_folder.strip('/')}/")
 
     st.space("medium")
     section("Create the ingestion workflow", icon=":material/account_tree:",
@@ -1410,7 +1411,7 @@ with tab_setup:
                     st.session_state["initialize_failures"] = []
                     st.exception(exc)
                     st.stop()
-                # One entry per configured domain (design/domains.yaml) - a
+                # One entry per configured domain (config.yaml) - a
                 # domain with nothing ingested yet (iso20020, for now)
                 # contributes 0/0, not an error, same as an empty corpus
                 # always has.

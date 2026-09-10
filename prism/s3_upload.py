@@ -12,10 +12,10 @@ in each filename (3M_2022_10K.pdf), and a real ingested chunk's
 "kpd-couchbase_Prism_3M_3M_2021_Q2_10Q.pdf" - one folder segment ("Prism_3M"
 from AWS_FOLDER), not a second one per company.
 
-The destination folder is config.aws_folder()/AWS_BUCKET - read from .env,
-the same values config.source_filename() uses to map a catalog entry back to
-its chunks. That's the whole point: one place those names live, not the
-upload form re-typed separately from what retrieval expects.
+The destination folder is config.domain_for(scope).aws_folder/AWS_BUCKET -
+the same domains: entry config.source_filename() flattens to map a catalog
+entry back to its chunks. That's the whole point: one place those names
+live, not the upload form re-typed separately from what retrieval expects.
 
 Credentials are parameters, never read from ~/.aws/credentials or an
 environment variable - the caller (the Setup tab) collects them from a
@@ -26,6 +26,8 @@ import os
 import pathlib
 
 import boto3
+
+from prism import config
 
 
 def find_pdfs(local_root: pathlib.Path) -> list:
@@ -38,14 +40,18 @@ def find_pdfs(local_root: pathlib.Path) -> list:
 
 
 def upload_pdfs(local_root: pathlib.Path, access_key: str, secret_key: str,
-                session_token: str = None, on_progress=None) -> dict:
+                session_token: str = None, scope: str = None,
+                on_progress=None) -> dict:
     """Uploads every PDF under local_root to
-    s3://{AWS_BUCKET}/{AWS_FOLDER}/{filename} - AWS_BUCKET/AWS_FOLDER/
-    AWS_REGION come from .env (config.py), not from the caller, so this is
-    always the same destination config.source_filename() expects. Straight
-    upload_file, no ExtraArgs - the destination is exactly what the Couchbase
-    AI Data Plane workflow reads from, and it doesn't need any tagging to do
-    that.
+    s3://{AWS_BUCKET}/{aws_folder}/{filename}, where aws_folder is this
+    scope's raw config.yaml entry (e.g. "Prism/3M", not the underscore-
+    flattened form config.aws_folder() returns for filename matching -
+    that flattening is the AI Data Plane workflow's own doing when it names
+    the ingested chunk, not the real S3 key). AWS_BUCKET/AWS_REGION are
+    account-level (config.py); scope picks which domain's folder this goes
+    to. Straight upload_file, no ExtraArgs - the destination is exactly what
+    the Couchbase AI Data Plane workflow reads from, and it doesn't need any
+    tagging to do that.
 
     on_progress(i, total, company, filename, ok, error=None) fires after each
     file, so a caller can render a progress bar without depending on this
@@ -61,7 +67,7 @@ def upload_pdfs(local_root: pathlib.Path, access_key: str, secret_key: str,
     s3 = session.client("s3")
 
     bucket = os.environ["AWS_BUCKET"]
-    folder = os.environ["AWS_FOLDER"].strip("/")
+    folder = config.domain_for(scope).aws_folder.strip("/")
     pairs = find_pdfs(local_root)
     uploaded, failed = [], []
     for i, (company, path) in enumerate(pairs, 1):

@@ -1,7 +1,7 @@
 """Initialize: the one operator action a user runs after the Couchbase AI Data
 Plane workflow finishes ingesting - no manual index setup required.
 
-Runs the same thirteen steps ONCE PER CONFIGURED DOMAIN (design/domains.yaml) - one
+Runs the same thirteen steps ONCE PER CONFIGURED DOMAIN (config.yaml) - one
 domain, one scope, each with its own docs/catalog search indexes. A domain
 with nothing ingested yet (iso20020, for now - architecture only, no real
 content) is not an error: its catalog rebuild step returns an empty result and
@@ -67,7 +67,7 @@ def run(model: str = None, sectors: dict = None, on_step=None,
        on_catalog_progress=None, on_index_progress=None,
        domains: list = None) -> dict:
     """Runs all thirteen steps, in order, for each domain in `domains` (defaults to
-    every domain design/domains.yaml configures - "init can do all scopes" is
+    every domain config.yaml configures - "init can do all scopes" is
     the point, not an opt-in). Stops at the first failure within a domain -
     a later step assumes every earlier one in THAT domain succeeded - but
     still attempts every remaining domain, since one domain's failure says

@@ -59,9 +59,9 @@ computing and only binds facts and writes prose. That switch is what makes
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp local.example.yaml local.yaml   # fill in Capella, AI Data Plane, AWS, OpenAI
-                                   # prism/config.py loads it directly - no
-                                   # shell sourcing step needed
+cp config.example.yaml config.yaml   # fill in Capella, AI Data Plane, AWS,
+                                     # OpenAI and your domains - one file,
+                                     # prism/config.py loads it directly
 ```
 
 ## Use

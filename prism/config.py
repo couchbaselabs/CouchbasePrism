@@ -8,24 +8,37 @@ import yaml
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def _load_local_secrets() -> None:
-    """local.yaml (gitignored) replaces .env - loaded here, once, at import,
-    rather than relying on a shell `set -a && source .env && set +a` step
-    every process had to remember before this. Populates os.environ under the
-    SAME names .env always used, so couchbase_host()/couchbase_auth()/
-    EMBED_ENDPOINT/etc. below don't change at all - only how the values get
-    there does. setdefault(), not direct assignment: a value already in the
-    real environment (CI, a container) wins over the file, same precedence
-    any dotenv-style loader uses."""
-    path = REPO_ROOT / "local.yaml"
-    if not path.exists():
-        return
-    for key, value in (yaml.safe_load(path.read_text()) or {}).items():
+CONFIG_PATH = REPO_ROOT / "config.yaml"
+
+# config.yaml's own field names -> the environment variable names this
+# codebase has always read (couchbase_host()/EMBED_ENDPOINT/etc. below don't
+# change at all - only how the values get there does). One file, not two:
+# secrets and domain topology used to live in local.yaml and
+# design/domains.yaml separately; a packaged deployment needs exactly one
+# file to copy, fill in, and mount into a container.
+_SECRET_FIELDS = {
+    ("couchbase", "connectionString"): "COUCHBASE_CONN_STRING",
+    ("couchbase", "username"): "COUCHBASE_USERNAME",
+    ("couchbase", "password"): "COUCHBASE_PASSWORD",
+    ("aiDataPlane", "modelEndpoint"): "MODEL_END_POINT",
+    ("aiDataPlane", "modelId"): "MODEL_ID",
+    ("aiDataPlane", "apiKey"): "API_KEY",
+    ("aws", "region"): "AWS_REGION",
+    ("aws", "bucket"): "AWS_BUCKET",
+    ("openai", "apiKey"): "OPENAI_API_KEY",
+    ("openai", "model"): "OPENAI_MODEL",
+}
+
+
+def _load_secrets(raw: dict) -> None:
+    """setdefault(), not direct assignment: a value already in the real
+    environment (CI, a container's own env vars) wins over the file, same
+    precedence any dotenv-style loader uses."""
+    for (section, field), env_name in _SECRET_FIELDS.items():
+        value = (raw.get(section) or {}).get(field)
         if value is not None:
-            os.environ.setdefault(key, str(value))
+            os.environ.setdefault(env_name, str(value))
 
-
-_load_local_secrets()
 
 # --- Couchbase -------------------------------------------------------------
 # Fixed, not environment-configurable, by deliberate choice - this is PRISM's
@@ -45,43 +58,44 @@ CONCEPTS_COLLECTION = "concepts"  # "tribal knowledge" - entity/topic meaning,
 # Empty today, deliberately - the collection exists for real in every domain
 # Initialize provisions, ahead of having real content to put in it.
 
-DOMAINS_PATH = REPO_ROOT / "design" / "domains.yaml"
-
-
 @dataclass(frozen=True)
 class Domain:
     scope: str          # the Couchbase scope this domain lives in - one
-                        # domain, one scope, by design (design/domains.yaml)
+                        # domain, one scope, by design (config.yaml)
     aws_folder: str      # ordinary AWS notation, e.g. "Prism/3M" - not
                         # pre-flattened; config.aws_folder() does that
     docs_index: str      # bare FTS index name over `docs` in this scope
     catalog_index: str   # bare FTS index name over `catalog` in this scope
 
 
-def _load_domains() -> tuple:
-    """design/domains.yaml is PRISM's own namespace contract, same category
-    as design/fts-index.json - committed, not customer state, since the
-    domain topology (which scopes/indexes exist) IS the reference
-    architecture this whole project is demonstrating, not a per-deployment
-    secret. Loaded once at import; missing or empty fails loudly rather than
-    quietly answering questions against a scope nothing configured."""
-    if not DOMAINS_PATH.exists():
+def _load_config() -> tuple:
+    """config.yaml (gitignored) is PRISM's one config file - copy
+    config.example.yaml, fill it in. Secrets and domain topology (which
+    scopes/indexes exist) used to be two separate files; a packaged
+    deployment needs exactly one to create and mount, matching how
+    couchbase-fhir-ce does it. Loaded once at import; missing or empty fails
+    loudly rather than quietly answering questions against a scope nothing
+    configured."""
+    if not CONFIG_PATH.exists():
         raise FileNotFoundError(
-            f"{DOMAINS_PATH} is missing - PRISM needs at least one domain "
-            "configured to know which Couchbase scope(s) to use.")
-    raw = yaml.safe_load(DOMAINS_PATH.read_text()) or {}
-    domains = {name: Domain(scope=name, **fields)
+            f"{CONFIG_PATH} is missing - copy config.example.yaml to "
+            "config.yaml and fill it in.")
+    raw = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+    _load_secrets(raw)
+    domains = {name: Domain(scope=name, aws_folder=fields["awsFolder"],
+                            docs_index=fields["docsIndex"],
+                            catalog_index=fields["catalogIndex"])
               for name, fields in (raw.get("domains") or {}).items()}
     if not domains:
-        raise ValueError(f"{DOMAINS_PATH} defines no domains")
+        raise ValueError(f"{CONFIG_PATH} defines no domains")
     default = raw.get("default") or next(iter(domains))
     if default not in domains:
-        raise ValueError(f"{DOMAINS_PATH}: default {default!r} is not one of "
+        raise ValueError(f"{CONFIG_PATH}: default {default!r} is not one of "
                          f"the configured domains {sorted(domains)}")
     return domains, default
 
 
-DOMAINS, DEFAULT_SCOPE = _load_domains()
+DOMAINS, DEFAULT_SCOPE = _load_config()
 # Transitional alias, not a fresh constant: every call site not yet threaded
 # through an explicit `scope` argument (retrieval/*, catalog/fts_resolver.py,
 # the Streamlit app) still reads config.SCOPE and gets the default domain,
@@ -97,7 +111,7 @@ def domain_for(scope: str = None) -> Domain:
         return DOMAINS[scope]
     except KeyError:
         raise KeyError(f"{scope!r} is not a configured domain - see "
-                       f"{DOMAINS_PATH} (configured: {sorted(DOMAINS)})")
+                       f"{CONFIG_PATH} (configured: {sorted(DOMAINS)})")
 
 
 # FTS index names must be FULLY QUALIFIED in N1QL SEARCH() calls; the bare
@@ -144,9 +158,9 @@ def couchbase_auth() -> tuple:
 
 
 # --- Source objects --------------------------------------------------------
-# aws_folder is per-domain topology (design/domains.yaml), not a secret - it
-# used to be a flat AWS_FOLDER env var before domains existed, back when there
-# was only one scope to feed from one S3 prefix.
+# aws_folder is per-domain topology (config.yaml's own domains: section), not
+# a secret - it used to be a flat AWS_FOLDER env var before domains existed,
+# back when there was only one scope to feed from one S3 prefix.
 def aws_folder(scope: str = None) -> str:
     """domain_for(scope).aws_folder is written in ordinary AWS folder notation
     (e.g. "Prism/3M", a real S3 prefix with a slash) - the flattening to
@@ -161,7 +175,7 @@ def source_filename(doc_name: str, scope: str = None) -> str:
     """The AI Data Plane workflow derives the stored filename from the S3
     location as {bucket}_{folder}_{name}.pdf, so a catalog doc_name does not
     match `xmeta-data.filename` directly. AWS_BUCKET is account-level (still
-    in local.yaml); the folder is per-domain."""
+    in config.yaml's aws: section); the folder is per-domain."""
     return f"{os.environ['AWS_BUCKET']}_{aws_folder(scope)}_{doc_name}.pdf"
 
 

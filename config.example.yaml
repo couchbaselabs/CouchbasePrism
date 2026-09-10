@@ -1,0 +1,50 @@
+# ============================================================================
+# PRISM - Configuration File
+# ============================================================================
+# Copy this file to config.yaml and fill it in. config.yaml is gitignored -
+# it holds real secrets and is never committed. This is the ONLY file a
+# deployment needs to create.
+# ============================================================================
+
+couchbase:
+  connectionString: "cb.xxxxx.cloud.couchbase.com"   # no couchbases:// prefix
+  username: "Administrator"
+  password: "changeme"
+
+# Used for query embeddings - must be the SAME model the Couchbase AI Data
+# Plane Unstructured Data Workflow used to embed the ingested chunks, or
+# retrieval silently degrades (the vectors are not comparable).
+aiDataPlane:
+  modelEndpoint: "https://xxxxx.ai.cloud.couchbase.com"
+  modelId: "your-model-id"
+  apiKey: "cbsk-..."   # the API Key TOKEN, not the API Key Id (a UUID) -
+                       # using the Id gives a 401 that reads like a bad endpoint
+
+# Account-level only. Which folder within this bucket feeds which domain is
+# configured per-domain below, not here.
+aws:
+  region: "us-west-2"
+  bucket: "your-s3-bucket"
+
+openai:
+  apiKey: "sk-..."
+  model: "gpt-5.4"   # optional, this is the default
+
+# ----------------------------------------------------------------------------
+# Domains - PRISM's own namespace contract. One Couchbase scope per domain,
+# each with its own catalog/docs/dictionary/concepts collections and its own
+# docs/catalog search index pair. `default` is which domain the app and
+# retrieval operate against until a domain selector picks a different one.
+#
+# awsFolder is ordinary AWS notation (a real S3 prefix, e.g. "Prism/3M") -
+# not pre-flattened. docsIndex/catalogIndex are the bare FTS index names
+# Initialize creates for this domain - keep them distinct across domains, or
+# two domains sharing a name will silently clobber each other's index.
+# ----------------------------------------------------------------------------
+domains:
+  secfilings:
+    awsFolder: "Prism/3M"
+    docsIndex: "ftsSecfilingsDocs"
+    catalogIndex: "ftsSecfilingsCatalog"
+
+default: secfilings

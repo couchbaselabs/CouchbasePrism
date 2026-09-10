@@ -391,7 +391,7 @@ sidestepped by content anchors instead.
 - Eval scripts: `eval/run_benchmark.py`, `eval/debug_question.py`
 - Catalog collection: `{bucket}.{scope}.catalog`; chunks: `{bucket}.{scope}.docs`
 - FTS indexes: one docs index and one catalog index per domain scope (see
-  `design/domains.yaml`) — **must be fully-qualified** in N1QL `SEARCH()`
+  `config.yaml`) — **must be fully-qualified** in N1QL `SEARCH()`
   calls, the bare short name fails
 - S3 object naming: `{AWS_BUCKET}_{AWS_FOLDER}_{doc_name}.pdf`
 - ADRs: `docs/adr/`
