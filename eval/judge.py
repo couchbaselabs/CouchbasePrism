@@ -18,7 +18,13 @@ A gold question and a PRISM result are each reduced to the SAME three
 sections - answer, formula, evidence - before judging, via gold_sections()/
 prism_sections() below, so the judge always compares like to like regardless
 of which of the two shapes (a yaml file, a pipeline result dict) they
-started as.
+started as. Only answer and formula are actually SCORED, though - evidence
+is shown to the judge and to a human (side by side, in the UI) purely as
+information. A 10-K prints its own key figures on several different pages
+by design, so a citation mismatch is not evidence of anything wrong;
+gating PASS on evidence overlap failed a fully correct answer that had
+simply cited a different, equally valid location for the same figure
+(3m-002, measured 2026-09-11) - never let it decide the verdict again.
 """
 import re
 
@@ -54,14 +60,16 @@ JUDGE_SYSTEM_PROMPT = (
     "matching one as the stated result. Only fail the FORMULA section if NONE of the listed "
     "candidates compute the reference's value, or if the reference has a formula and the "
     "candidate has none at all.\n\n"
-    "EVIDENCE is lenient. The candidate's retrieval commonly returns more chunks than it "
-    "ends up citing, so its evidence list may legitimately be a SUPERSET of the "
-    "reference's - overlap is sufficient, and an exact match must never be required. "
-    "Measured case: a fully correct answer retrieved 10 chunks of which only 3 actually "
-    "carried the stated figures; demanding the candidate's evidence equal the reference's "
-    "would have failed a fully correct response. Only flag evidence as a problem if there "
-    "is NO meaningful overlap at all between the two - never let evidence alone fail an "
-    "otherwise-correct answer.\n\n"
+    "EVIDENCE decides NOTHING - it is informational only, never a reason to pass or fail. "
+    "A 10-K repeats its key figures by design: the same net sales figure commonly prints on "
+    "half a dozen different pages (a statement, an MD&A table, a segment note, a non-GAAP "
+    "reconciliation...), and any one of them is a legitimate citation. Measured case: the "
+    "reference cited the Consolidated Statement of Income; the candidate answered correctly "
+    "from the MD&A instead, citing entirely different pages with zero overlap - both were "
+    "right, because 3M prints that same net sales figure on six different pages of the same "
+    "filing. Do not read anything into a citation mismatch, a citation overlap, or a missing "
+    "citation - judge ANSWER and FORMULA alone and mention evidence in your comment only as "
+    "an observation, never as a reason.\n\n"
     'Respond with exactly one JSON object: {"pass": true or false, "comment": "one '
     'sentence explaining the verdict, naming which section(s) drove it"}'
 )
@@ -69,9 +77,11 @@ JUDGE_SYSTEM_PROMPT = (
 
 def gold_sections(question: dict) -> dict:
     """A gold question dict (eval/corpora's shared shape) reduced to the
-    three sections the judge compares - answer/formula/evidence exactly as
-    authored, no reshaping needed since the gold schema already carries them
-    in this shape."""
+    three sections shown to the judge - answer/formula exactly as authored,
+    no reshaping needed since the gold schema already carries them in this
+    shape. evidence rides along for the side-by-side display and the
+    judge's own comment, but is advisory only - see JUDGE_SYSTEM_PROMPT,
+    which explicitly tells the model not to let it affect pass/fail."""
     return {
         "answer": question.get("answer") or "",
         "formula": question.get("formula"),
