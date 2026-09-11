@@ -227,6 +227,55 @@ def company_catalog(catalog_docs: list, company: str) -> list:
     return matched or catalog_docs
 
 
+_WB_HASH_PHRASE = re.compile(r"#([^#]+)#")
+
+
+def parse_workbench_terms(search_terms: str) -> dict:
+    """Workbench-only term syntax - richer than the shared
+    extract_phrase_terms() the retrieval pipeline uses, and deliberately not
+    the same function: that one folds a forced phrase in ADDITIVELY,
+    alongside bag-of-words scoring on the same words, which is right for
+    production Q&A (a phrase is one more scoring signal, not a hard filter)
+    and wrong for a verification tool, where the entire point is isolating
+    an exact phrase from loose word matches - "show me only chunks with
+    this exact phrase," not "boost this phrase a little."
+
+    #phrase# is a pure exact-phrase filter here: the words inside it do
+    NOT also contribute to bag-of-words scoring. Multiple #phrase# spans
+    combine via an explicit & (AND, every phrase required) or | (OR, any
+    one is enough) placed between them; omitting a connector between two
+    or more phrases defaults to AND - a calculation's own facts are
+    typically read off ONE table where they all appear together (e.g.
+    #net sales# #operating income# for an operating margin question), so
+    that is the more useful default for this exploration tool, though
+    never the assumption baked into the shared retrieval pipeline. Any
+    words left over outside the phrase spans (e.g. the trailing "loss" in
+    "#net sales# #operating income# loss") are ordinary BM25 bag-of-words
+    terms, required as their own separate match.
+
+    Returns {"phrases": [...], "operator": "and"|"or", "bag_terms": "<remaining text>"}.
+    """
+    phrases, spans = [], []
+    for m in _WB_HASH_PHRASE.finditer(search_terms):
+        phrases.append(m.group(1).strip())
+        spans.append(m.span())
+
+    operator = "and"
+    if len(phrases) > 1:
+        gaps = [search_terms[a[1]:b[0]] for a, b in zip(spans, spans[1:])]
+        if any("|" in gap for gap in gaps):
+            operator = "or"
+
+    # Bag terms: everything NOT inside a #...# span, with bare & or |
+    # connector characters stripped too - they are operators, not words to
+    # search for.
+    bag_text = _WB_HASH_PHRASE.sub(" ", search_terms)
+    bag_text = re.sub(r"[&|]", " ", bag_text)
+    bag_terms = " ".join(bag_text.split())
+
+    return {"phrases": phrases, "operator": operator, "bag_terms": bag_terms}
+
+
 def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
                  limit: int = 50, source_filename: str = None) -> list:
     """Chunks for one document, JSON-ready. The embedding vector is stripped
@@ -257,10 +306,11 @@ def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
     defeat it. Same text-to-embed field and match/OR shape the retrieval
     path's BM25 leg already uses (the index's own scoring_model is "bm25",
     confirmed from its live definition), not a raw LIKE. A #...# span inside
-    search_terms is a forced exact-phrase match, same syntax and same
-    extract_phrase_terms() as the runtime pipeline's Path A (prism/retrieval/
-    planner.py) - added as its own match_phrase disjunct alongside the usual
-    bag-of-words match, not instead of it.
+    search_terms is parsed by parse_workbench_terms() (see its own
+    docstring for the full &/| syntax) - deliberately its own, richer
+    syntax, not the shared extract_phrase_terms() the retrieval pipeline
+    uses; a phrase here is an exact, exclusive filter, not an additive
+    scoring signal.
 
     A document-wide term search has no natural bound the way a single page
     does, so this caps at `limit` - callers should tell the user when the
@@ -269,20 +319,35 @@ def fetch_chunks(doc_name: str, page: int = None, search_terms: str = None,
     conjuncts = ['{"field": "xmeta-data.filename", "match": $filename}']
     params = {"$filename": source_filename or config.source_filename(doc_name)}
     if search_terms:
-        # A forced phrase is a DISJUNCT alongside the bag-of-words match, not
-        # an extra required conjunct - "either finds it" is the point, same
-        # as Path A's own lexical leg (prism/retrieval/hybrid_search.py). A
-        # top-level conjunct here would instead require BOTH to match, which
-        # is a much narrower (and wrong) search than what #...# is for.
-        cleaned_terms, phrases = retrieval.extract_phrase_terms(search_terms)
-        term_disjuncts = ['{"match": $terms, "field": "text-to-embed", '
-                         '"operator": "or"}']
-        params["$terms"] = cleaned_terms
-        for i, phrase in enumerate(phrases):
-            key = f"$phrase_{i}"
-            term_disjuncts.append(f'{{"match_phrase": {key}, "field": "text-to-embed"}}')
-            params[key] = phrase
-        conjuncts.append(f'{{"disjuncts": [{", ".join(term_disjuncts)}]}}')
+        parsed = parse_workbench_terms(search_terms)
+        phrases, operator, bag_terms = (parsed["phrases"], parsed["operator"],
+                                        parsed["bag_terms"])
+        if phrases:
+            phrase_clauses = []
+            for i, phrase in enumerate(phrases):
+                key = f"$phrase_{i}"
+                phrase_clauses.append(f'{{"match_phrase": {key}, "field": "text-to-embed"}}')
+                params[key] = phrase
+            # A single phrase is just one required conjunct; multiple
+            # combine via the parsed operator - conjuncts (AND, every
+            # phrase required) or disjuncts (OR, any one is enough). Either
+            # way this is a REQUIRED filter, not a scoring disjunct - the
+            # opposite of the shared pipeline's own additive design (see
+            # parse_workbench_terms()'s docstring for why that's the point).
+            if len(phrase_clauses) == 1:
+                conjuncts.append(phrase_clauses[0])
+            elif operator == "and":
+                conjuncts.append(f'{{"conjuncts": [{", ".join(phrase_clauses)}]}}')
+            else:
+                conjuncts.append(f'{{"disjuncts": [{", ".join(phrase_clauses)}]}}')
+        if bag_terms:
+            # Leftover words outside any #phrase# span are ordinary BM25 -
+            # required too (a further AND on top of the phrase filter), not
+            # merely a ranking nudge, so "…# loss" narrows rather than just
+            # reorders.
+            conjuncts.append('{"match": $terms, "field": "text-to-embed", '
+                             '"operator": "or"}')
+            params["$terms"] = bag_terms
         # A term search should surface the best match first, not page order -
         # on 3M's 2022 10-K, "current assets" in page order buries the
         # Working Capital table (page 38, which nets current assets against
@@ -1484,8 +1549,16 @@ with tab_workbench:
                "embedding vector is left out of what's shown here; 2048 floats add "
                "nothing to read. Search terms search the WHOLE document, ignoring "
                "the page number - without terms, Page scopes to one page. Wrap a "
-               "span in #hashes# (e.g. `#John Doe#`) to force an exact-phrase match "
-               "on it alongside the usual BM25 terms.")
+               "span in #hashes# for an EXACT, exclusive phrase match - "
+               "`#net sales#` shows only chunks containing that phrase verbatim, "
+               "not chunks merely containing \"net\" or \"sales\". Multiple phrases "
+               "combine with & (AND, every phrase required - the default when no "
+               "connector is given) or | (OR, any one is enough): "
+               "`#net sales# #operating income#` requires both; "
+               "`#net sales# | #operating income#` needs only one. Any words left "
+               "over outside the phrase spans are ordinary BM25, required as their "
+               "own additional match - `#net sales# #operating income# loss` needs "
+               "both phrases AND the word \"loss\" somewhere.")
     # Derived from the SELECTED scope's own catalog, not the eval question
     # corpus's company list (that list is gone now - a single-company
     # installation has nothing to pick between there). Labeled "Scope" like
@@ -1507,7 +1580,7 @@ with tab_workbench:
         wb_page = st.number_input("Page", min_value=1, step=1, key="wb_page")
     with wb_cols[3]:
         wb_terms = st.text_input("Search terms (optional)", key="wb_terms",
-                                 placeholder='e.g. total current assets, or #John Doe#')
+                                 placeholder='e.g. #net sales# #operating income#')
     if st.button("Fetch", icon=":material/search:", key="wb_fetch",
                 disabled=not wb_doc_names):
         terms = wb_terms.strip() or None
@@ -1537,12 +1610,19 @@ with tab_workbench:
                     label += f" · score {chunk.get('_score', 0):.3f}"
                 with st.expander(label):
                     if terms:
-                        # Strip #...# hashes before highlighting - the raw
+                        # Strip #...#/&/| before highlighting, same parse as
+                        # the query itself (parse_workbench_terms) - the raw
                         # terms would search for the literal substring
-                        # "#John" (never present in the text), silently
+                        # "#net" (never present in the text), silently
                         # highlighting nothing for exactly the words a phrase
-                        # search cares most about.
-                        highlight_words, _ = retrieval.extract_phrase_terms(terms)
+                        # search cares most about. Highlighting itself is
+                        # purely cosmetic (which words appear), so phrases
+                        # and bag terms are just pooled together here - the
+                        # AND/OR distinction that matters for the query
+                        # itself has no visual equivalent worth building.
+                        parsed_terms = parse_workbench_terms(terms)
+                        highlight_words = " ".join(
+                            parsed_terms["phrases"] + [parsed_terms["bag_terms"]])
                         st.markdown("**Matched text, terms highlighted:**")
                         st.html(highlight_terms(chunk.get("text-to-embed"), highlight_words))
                         st.divider()
