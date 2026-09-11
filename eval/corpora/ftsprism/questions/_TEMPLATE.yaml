@@ -1,67 +1,65 @@
-# TEMPLATE - copy this file, rename to a descriptive-slug.yaml (the filename,
-# minus .yaml, becomes the question's id - no separate id: field, so the id
-# and the filename can never drift apart). Leading "_" files (this one
-# included) are ignored by the loader, so the template is never picked up as
-# a real question.
+# TEMPLATE - copy this file, rename to the next free number (3m-002.yaml,
+# 3m-003.yaml, ...). Leading "_" files (this one included) are ignored by the
+# loader, so the template is never picked up as a real question.
 #
-# Fill in every field below, then delete these comments.
+# Fill in every field, then delete these comments.
 
-doc_name: EXAMPLE_2022_10K        # must match an entry in ../documents.yaml
+number: 0                     # drives ordering in the UI dropdown; keep unique
+title: REPLACE_ME             # short label shown in the dropdown - a noun
+                              # phrase ("Effective Tax Rate"), not a sentence
+
+category: REPLACE_ME          # ONE of, and nothing else:
+                              #   single-doc-extraction   find the fact in one filing
+                              #   single-doc-computed     formula, no approved entry
+                              #   governed-formula        dictionary entry governs it
+                              #   phrase-precision        exact strings BM25 pins
+                              #   concept-semantic        no lexical anchor; vector carries it
+                              #   multi-doc-range         spans filings (map/reduce)
+
+doc_names:                    # ALWAYS a list, even for one document - one type
+  - REPLACE_ME                # for the loader to handle. Each name must match
+                              # an entry in ../documents.yaml.
 
 question: >
-  Write an ORIGINAL question in your own words, drafted directly against
-  the filing itself - not paraphrased from anywhere else.
+  Write an ORIGINAL question in your own words, as a finance analyst would
+  actually ask it, drafted against the filing itself.
+  #
+  # NO VAGUE QUANTIFIERS. "largest", "main", "primary", "key", "significant"
+  # make a gold ungradeable, because a correct-but-partial answer can be
+  # scored either way. Measured: asking for the "largest" items reconciling
+  # 3M's FY2025 tax rate returned 6 of 8 - it read "largest" as a threshold
+  # and cut everything under 1.0, and the items then did not sum to the
+  # stated rate. Rewording to "the items" returned all nine. Ask for what you
+  # actually want counted.
 
-concept: null                      # e.g. "quick_ratio" when this question is
-                                    # answered by a formula that also has a
-                                    # dictionary.yaml entry of the same name;
-                                    # null for a direct-extraction question.
+answer: |
+  Markdown. Renders in the UI, so use a table when the source is a table -
+  it makes a wrong total visible at a glance.
 
-formula: null                      # the exact expression that produces
-                                    # expected_answer below, e.g.
-                                    # "(current_assets - inventory) / current_liabilities"
-                                    # null if this is a direct extraction, not
-                                    # a computed metric.
+  Quote the source's OWN printed row labels verbatim ("Nontaxable or
+  nondeductible items", not "non-deductible expenses"), and keep every
+  column the source shows. That is what makes this checkable line-by-line
+  against the filing.
 
-expected_answer: "REPLACE_ME"
+formula: null                 # the exact expression producing the answer, e.g.
+                              # "(total_current_assets - inventory) / total_current_liabilities"
+                              # Identifier-based, not numbers-substituted.
+                              # null for a direct-extraction question.
 
-keywords:                          # literal lexical terms a BM25/keyword
-  - "REPLACE_ME"                   # search should be able to match this
-                                    # question on - what makes the corpus
-                                    # useful for demonstrating hybrid fusion
-                                    # (not just vector recall).
+evidence:                     # one line per location, "DOC: Page N · Section · type"
+  - "REPLACE_ME: Page 0 · Section heading as printed · table"
+                              # type is text | table | footnote, matching the
+                              # ingested chunk's own type. Page numbers are PDF
+                              # page indexes (1-indexed), NOT the filing's
+                              # printed folio - those differ, and getting it
+                              # wrong has bitten this corpus before.
 
-tags:                               # categorizes the QUESTION, not what it's
-  - "REPLACE_ME"                   # findable by (that's keywords, above) -
-                                    # reasoning type and shape, e.g.
-                                    # numerical-reasoning | extraction |
-                                    # table | single-document | multi-document
+verified: false               # true ONLY when the values and evidence have been
+                              # checked against the actual filing - not merely
+                              # because PRISM produced them. A wrong gold is worse
+                              # than no gold: it passes silently, forever.
 
-gold_answer:                        # optional - only for a question whose
-  value: null                       # answer is a specific number. Alongside
-  unit: null                        # expected_answer (still what the LLM
-  tolerance: null                   # judge compares against), not instead of
-                                    # it - lets a numeric question eventually
-                                    # be graded by exact match instead of
-                                    # judged semantically. Delete this whole
-                                    # block for a non-numeric question.
-
-evidence:
-  - page: 0                        # 1-indexed, matching the PDF's own page number
-    title: "REPLACE_ME"            # the section/table heading as printed
-    type: text                     # text | table - matches meta-data.type in
-                                    # the ingested chunk schema
-    table_name: null                # only set when type: table
-    text: >
-      A short, verbatim quote from the filing itself - not from any third
-      party's annotation of it - that grounds expected_answer.
-
-lineage:
-  method: manual                   # manual | prism-assisted (drafted by
-                                    # PRISM's own answer pipeline, then
-                                    # human-reviewed)
-  authored_by: "REPLACE_ME"
-  verified: false                  # true only once a human has checked the
-                                    # value and evidence against the actual
-                                    # filing
-  added_at: "REPLACE_ME"
+notes: >                      # optional - context for whoever reads this next.
+  Anything a future author needs: how it was verified, arithmetic that should
+  reconcile, a presentation quirk in the source, why a near-miss wording was
+  rejected.

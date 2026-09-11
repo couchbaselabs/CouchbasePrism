@@ -90,12 +90,14 @@ extensions, or track each document's format explicitly in `documents.yaml`)
 1. Confirm the document is already in `documents.yaml` (see above if not).
 2. Optional: run it through PRISM's own catalog + answer pipeline first and
    use what it produces as a first draft of the question, answer, and
-   evidence - `lineage.method: prism-assisted`. Faster than authoring cold,
-   but the human-verification step below is not optional either way.
-3. Copy `questions/_TEMPLATE.yaml` to a descriptive-slug.yaml, fill in every
-   field, and open the actual filing to check the value and evidence quote
-   against it directly. Only set `lineage.verified: true` once that check has
-   actually happened.
+   evidence - note as much in `notes:`. Faster than authoring cold, but the
+   human-verification step below is not optional either way.
+3. Copy `questions/_TEMPLATE.yaml` to `3m-NNN.yaml` (the next free number -
+   matches the `number:` field, which drives ordering in the UI dropdown),
+   fill in every field, and open the actual filing to check the value and
+   evidence quote against it directly. Only set `verified: true` once that
+   check has actually happened - a wrong gold is worse than no gold, since
+   it passes silently, forever.
 
 ## Running it
 

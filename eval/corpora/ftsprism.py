@@ -5,27 +5,29 @@ PDF here is pulled directly from SEC EDGAR (public record - PRISM never
 redistributes a third party's compiled copy), and every question, gold
 answer and evidence excerpt is either authored by hand against the
 underlying filing or drafted by PRISM's own answer pipeline and then
-human-verified. See ftsprism/README.md for the full schema and how to add
-to it.
+human-verified. See ftsprism/questions/_TEMPLATE.yaml for the full schema
+and how to add to it.
 
 Extra fields beyond the shared adapter interface (eval/corpora/__init__.py),
 all optional - a consumer must tolerate their absence:
-    formula      the exact expression that produces expected_answer, or None
-                 for a direct-extraction question. Identifier-based (e.g.
+    doc_names    ALWAYS a list, even for a single-document question - one
+                 type for every consumer to handle, and a multi-doc-range
+                 question (see category below) genuinely needs more than one.
+    number       drives ordering in the UI dropdown.
+    title        short label for the UI dropdown - a noun phrase, not a
+                 sentence.
+    category     one of single-doc-extraction, single-doc-computed,
+                 governed-formula, phrase-precision, concept-semantic,
+                 multi-doc-range - see _TEMPLATE.yaml for what each means.
+    formula      the exact expression that produces `answer`, or None for a
+                 direct-extraction question. Identifier-based (e.g.
                  "(total_current_assets - inventory) / total_current_liabilities"),
                  matching how prism/retrieval/planner.py's formula_identifiers()
                  parses a dictionary.yaml formula - not a numbers-substituted
                  derivation, which wouldn't be reusable the same way.
-    keywords     literal lexical terms the question should be findable by -
-                 lets a hybrid-search demo show the BM25 channel actually
-                 contributing something, not just the vector one.
-    tags         categorizes the QUESTION (reasoning type, shape - e.g.
-                 numerical-reasoning, single-document), not what it's
-                 findable by - that's keywords, above.
-    gold_answer  optional {value, unit, tolerance} alongside expected_answer,
-                 for a numeric question - not a replacement for it. Lets a
-                 future scorer exact-match instead of relying on an LLM judge
-                 for something that's actually deterministic.
+    verified     true only when a human (not just PRISM) has checked the
+                 values and evidence against the actual filing.
+    notes        free-text context for whoever reads this question next.
 """
 import pathlib
 
@@ -48,33 +50,35 @@ def _documents() -> list:
 
 def _load_question(path: pathlib.Path, doc_lookup: dict) -> dict:
     data = yaml.safe_load(path.read_text()) or {}
-    doc = doc_lookup.get(data["doc_name"], {})
+    doc_names = data.get("doc_names") or []
+    # Company is a convenience filter only (see documents.yaml's own note) -
+    # every doc_names entry belongs to the same company in this corpus today,
+    # so the first is enough to look it up by. A genuinely multi-company
+    # corpus would need this to actually check for agreement, not just read
+    # doc_names[0].
+    doc = doc_lookup.get(doc_names[0], {}) if doc_names else {}
     return {
         "id": path.stem,
+        "number": data.get("number"),
+        "title": data.get("title"),
+        "category": data.get("category"),
         "question": (data.get("question") or "").strip(),
-        "expected_answer": str(data.get("expected_answer")),
-        "doc_name": data["doc_name"],
+        "answer": str(data.get("answer") or "").strip(),
+        "doc_names": doc_names,
         "company": doc.get("company"),
-        "evidence": [
-            {"doc_name": data["doc_name"], "page": e.get("page"),
-             "text": e.get("text"), "title": e.get("title"),
-             "type": e.get("type"), "table_name": e.get("table_name")}
-            for e in data.get("evidence", [])
-        ],
+        "evidence": list(data.get("evidence") or []),
         "formula": data.get("formula"),
-        "concept": data.get("concept"),
-        "keywords": data.get("keywords") or [],
-        "tags": data.get("tags") or [],
-        "gold_answer": data.get("gold_answer"),
-        "lineage": data.get("lineage") or {},
+        "verified": bool(data.get("verified", False)),
+        "notes": (data.get("notes") or "").strip(),
     }
 
 
 def questions(company: str = None, limit: int = None) -> list:
     """Returns dicts with the shared adapter shape
-    ({id, question, expected_answer, doc_name, company, evidence}), plus
-    formula, concept, keywords and lineage. Files under questions/ whose name
-    starts with "_" (the template) are never loaded as real questions."""
+    ({id, question, answer, doc_names, company, evidence}), plus number,
+    title, category, formula, verified and notes. Files under questions/
+    whose name starts with "_" (the template) are never loaded as real
+    questions."""
     doc_lookup = {d["doc_name"]: d for d in _documents()}
     out = []
     for path in sorted((ROOT / "questions").glob("*.yaml")):

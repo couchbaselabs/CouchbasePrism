@@ -1,59 +1,47 @@
-doc_name: 3M_2023_10K
+number: 2
+title: Operating Margin & Special Charges
+
+category: single-doc-computed
+
+doc_names:
+  - 3M_2023_10K
 
 question: >
-  Calculate 3M's Operating Income (Loss) Margin for the full year 2023 on a GAAP basis, and explain the primary special charge driver that caused it to decline compared to FY2022.
+  Calculate 3M's Operating Income (Loss) Margin for the full year 2023 on a
+  GAAP basis, and explain the primary special charge driver that caused it
+  to decline compared to FY2022.
 
-concept: operating margin and special charge impact
+answer: |
+  3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%**
+  (operating income (loss) of $(9,128) million on net sales of $32,681
+  million).
+
+  The primary driver of the decline was special charges for significant
+  litigation: 2023 included approximately $15.2 billion pre-tax in
+  litigation costs, comprising a $10.5 billion charge for the PWS
+  Settlement and a $4.3 billion charge (inclusive of imputed interest) for
+  the Combat Arms Earplugs (CAE) Settlement.
 
 formula: (operating_income_loss / net_sales) * 100
 
-expected_answer: "-27.9%"
-
-keywords:
-  - "operating expenses"
-  - "operating income (loss) margin"
-  - "net sales"
-  - "PWS Settlement"
-  - "Combat Arms Earplugs"
-  - "#3M COMPANY#"
-  - "#Consolidated Statement of Income (Loss)#"
-
-tags:
-  - numerical-reasoning
-  - multi-page
-  - time-series
-  - GAAP-vs-NonGAAP
-
-gold_answer:
-  value: -27.9306
-  unit: percentage
-  tolerance: 0.1
-
 evidence:
-  - page: 82
-    title: "Consolidated Statement of Income (Loss)"
-    type: table
-    table_name: "Consolidated Statement of Income (Loss)"
-    text: >
-      Years ended December 31, 2023:
-      Net sales: $32,681 million
-      Operating income (loss): $(9,128) million
-  - page: 36
-    title: "Overview"
-    type: text
-    table_name: "Overview"
-    text: >
-      During 2023, 3M's costs for significant litigation totaled approximately
-      $15.2 billion pre-tax and included pre-tax charges of $10.5 billion and
-      $4.3 billion (inclusive of imputed interest) related to the PWS Settlement
-      and the CAE Settlement, respectively.
+  - "3M_2023_10K: Page 82 · Consolidated Statement of Income (Loss) · table"
+  - "3M_2023_10K: Page 36 · Overview · text"
 
-lineage:
-  method: manual-curated
-  authored_by: "gemini+prasad"
-  verified: true
-  verification_note: >
-    Page numbers corrected 2026-09-07 (44->82, 19->36) - verified live against
-    the actual ingested chunks: the originally-cited pages hold different
-    tables/sections entirely. Text content itself was already an exact match.
-  added_at: "2026-09-07"
+verified: true
+
+notes: >
+  -9,128 / 32,681 * 100 = -27.93%, matching the -27.9% expected answer.
+
+  Page numbers were corrected 2026-09-07 (44->82, 19->36) and verified live
+  against the actual ingested chunks - the originally-cited pages held
+  different tables/sections entirely; the text content itself was already
+  an exact match.
+
+  The FY2022 comparison itself (the filing's own prior-year column) was not
+  independently re-verified during this schema migration - only the FY2023
+  figures and the litigation-charge evidence above were. A future reader
+  wanting the exact FY2022 margin should pull it from the same statement.
+
+  Migrated from the pre-doc_names/answer schema 2026-09-11; authored
+  2026-09-07 (gemini+prasad, manual-curated).

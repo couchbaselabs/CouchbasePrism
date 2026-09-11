@@ -91,9 +91,12 @@ COMPUTED_ANSWER_PROMPT = (
     "answering a question nobody asked.\n\n"
     "If it says the verdict is BLOCKED, report the candidates and say the conventions "
     "disagree.\n\n"
-    "Answer in exactly two short paragraphs: the first states the answer itself, pithily, "
-    "with citations; the second explains how it was arrived at - the formula/derivation "
-    "and the specific figures used, cited by [number].\n\n"
+    "Answer in ONE short paragraph: state the answer itself, pithily, with citations. "
+    "Do not also restate the formula or walk through the derivation in prose - the "
+    "computed block above already gives the exact formula and figures used, and the UI "
+    "shows it in its own separate section verbatim. A second paragraph re-deriving it in "
+    "your own words only risks drifting out of sync with the one that's actually "
+    "authoritative.\n\n"
     f"{PLAIN_PROSE_RULE}\n\n{CURRENCY_RULE}"
 )
 

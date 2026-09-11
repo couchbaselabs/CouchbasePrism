@@ -1,43 +1,36 @@
-doc_name: 3M_8K_2023-07-25_000056_earnings
+number: 3
+title: Adjusted Free Cash Flow Conversion
+
+category: single-doc-computed
+
+doc_names:
+  - 3M_8K_2023-07-25_000056_earnings
 
 question: >
-  What was 3M's reported Adjusted Free Cash Flow Conversion for the second quarter of 2023, and what formula was used to derive it?
+  What was 3M's reported Adjusted Free Cash Flow Conversion for the second
+  quarter of 2023, and what formula was used to derive it?
 
-concept: adjusted free cash flow conversion
+answer: |
+  3M's reported Adjusted Free Cash Flow Conversion for Q2 2023 was **122%**,
+  computed as Adjusted Free Cash Flow divided by Adjusted Net Income
+  Attributable to 3M.
+
+  For the three months ended June 30, 2023: Adjusted free cash flow was
+  $1,463 million and Adjusted net income attributable to 3M was $1,204
+  million ($1,463M / $1,204M = 121.5%, rounding to the 122% the release
+  itself prints).
 
 formula: (adjusted_free_cash_flow / adjusted_net_income_attributable_to_3m) * 100
 
-expected_answer: "122%"
-
-keywords:
-  - "Adjusted free cash flow conversion"
-  - "Adjusted free cash flow"
-  - "Adjusted net income (loss) attributable to 3M"
-
-tags:
-  - non-gaap
-  - single-document
-  - ratio-calculation
-  - earnings-release
-
-gold_answer:
-  value: 121.5116
-  unit: percentage
-  tolerance: 0.5
-
 evidence:
-  - page: 11
-    title: "Supplemental Financial Information - Non-GAAP Measures (Continued)"
-    type: table
-    table_name: "Adjusted Free Cash Flow (non-GAAP measure)"
-    text: >
-      Three months ended June 30, 2023:
-      Adjusted free cash flow: $1,463 million
-      Adjusted net income attributable to 3M: $1,204 million
-      Adjusted free cash flow conversion: 122%
+  - "3M_8K_2023-07-25_000056_earnings: Page 11 · Supplemental Financial Information - Non-GAAP Measures (Continued) · table"
 
-lineage:
-  method: manual-curated
-  authored_by: "gemini+prasad"
-  verified: true
-  added_at: "2026-09-07"
+verified: true
+
+notes: >
+  1,463 / 1,204 * 100 = 121.51%, close enough to the 122% the release
+  itself states (rounding) that both the printed and computed readings
+  agree - no printed-vs-computed ambiguity here.
+
+  Migrated from the pre-doc_names/answer schema 2026-09-11; authored
+  2026-09-07 (gemini+prasad, manual-curated).

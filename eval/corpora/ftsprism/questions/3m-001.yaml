@@ -1,0 +1,63 @@
+number: 1
+title: Effective Tax Rate
+
+category: single-doc-extraction
+
+# Always a list, even for a single document - one type for the loader to
+# handle, and multi-doc (range) questions need it anyway. Each evidence line
+# below names its own document, because for a range question they differ.
+doc_names:
+  - 3M_2025_10K
+
+question: >
+  What was 3M's effective tax rate for fiscal 2025, and what were the items
+  reconciling it to the U.S. federal statutory rate?
+
+answer: |
+  3M's effective worldwide tax rate for fiscal 2025 was **23.8%**.
+
+  The items reconciling it to the U.S. federal statutory rate were
+  (amounts in millions):
+
+  | Item | Amount | Percent |
+  |---|---:|---:|
+  | U.S. federal statutory tax rate | $885 | 21.0% |
+  | State and local income taxes, net of federal income tax effect | $26 | 0.6 |
+  | Foreign tax effects | $212 | 5.0 |
+  | Global intangible low-taxed income (net of foreign tax credits) | $100 | 2.4 |
+  | Other | $(71) | (1.7) |
+  | Tax credits | $(44) | (1.0) |
+  | Changes in valuation allowances | $(87) | (2.1) |
+  | Nontaxable or nondeductible items | $32 | 0.8 |
+  | Changes in unrecognized tax benefits | $(50) | (1.2) |
+  | **Effective worldwide tax rate** | **$1,003** | **23.8%** |
+
+formula: null
+
+evidence:
+  - "3M_2025_10K: Page 106 · Note 9. Income Taxes · table"
+  - "3M_2025_10K: Page 107 · Note 9. Income Taxes · table"
+
+verified: true
+
+notes: >
+  Values and evidence checked directly against 3M_2025_10K.pdf (PyMuPDF text
+  extraction of pages 106-107), and independently corroborated by a live PRISM
+  run that returned the same nine rows with matching amounts.
+
+  The nine percentages sum exactly to the 23.8% effective rate
+  (21.0 + 0.6 + 5.0 + 2.4 - 1.7 - 1.0 - 2.1 + 0.8 - 1.2 = 23.8). The printed
+  rate also equals the derived one - 1,003 / 4,213 = 23.81% - so the
+  "printed vs computed" reading is unambiguous here. Both are continuing
+  operations.
+
+  Page numbers are PDF page indexes, CONFIRMED against ingested chunks: a live
+  run returned evidence at 106 (text), 107 (table) and 108 (text + table +
+  footnote), matching what those PDF pages actually hold. They are NOT the
+  filing's printed folio (PDF page 107 prints "56").
+
+  Hazard for a future range question: 3M changed this table's presentation
+  between years. FY2025 (p.107) has Amount and Percent columns with labels
+  like "Foreign tax effects"; FY2024/FY2023 (p.108) is percent-only with
+  different labels ("International income taxes - net", "Statutory U.S. tax
+  rate"). A cross-period tax question must survive that relabeling.

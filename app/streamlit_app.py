@@ -414,13 +414,13 @@ def run_one(question: dict, catalog_docs: list, dictionary_data: dict,
             question["question"], company_catalog(catalog_docs, question["company"]),
             dictionary_data, options=options, model=model, scope=scope)
         # A custom question has no gold reference to judge against -
-        # question["expected_answer"] is display text for the UI, not data a
-        # judge call should ever see.
+        # question["answer"] is display text for the UI, not data a judge
+        # call should ever see.
         verdict = ({"passed": None, "method": "unscored",
                    "comment": "Custom question — no reference answer to score against."}
                   if question["id"] == "custom" else
-                  judge.score(question["question"], question["expected_answer"],
-                             result["answer"], model=model))
+                  judge.score(question["question"], judge.gold_sections(question),
+                             judge.prism_sections(result), model=model))
     stats = trace_stats(events)
     stats["wall_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return {"question": question, "result": result, "verdict": verdict,
@@ -820,12 +820,15 @@ RESULT_COLUMNS = [
 
 
 def _md_bold(text: str) -> str:
-    """Escape first, then turn **bold** into <strong> - the one bit of the LLM's
-    own markdown this table renders. st.html() does not run a markdown parser
-    (that was the source of the leaked-tag bug this replaced), so **emphasis**
-    from an answer or judge comment would otherwise show as literal asterisks
-    instead of being dropped silently or corrupting tags."""
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html.escape(text))
+    """Strip markdown first, then escape - st.html() does not run a markdown
+    parser (that was the source of the leaked-tag bug this replaced), so raw
+    markdown from an answer or judge comment would otherwise show as literal
+    asterisks/pipes instead of being dropped silently or corrupting tags. The
+    gold answer is now always markdown and commonly a table (see
+    ftsprism/questions/_TEMPLATE.yaml) - this compact summary row has no room
+    to render one, so judge.strip_markdown() reduces it to plain text rather
+    than showing raw "|---|---:|" syntax."""
+    return html.escape(judge.strip_markdown(text))
 
 
 def results_table_html(runs: list) -> str:
@@ -842,7 +845,7 @@ def results_table_html(runs: list) -> str:
             f'<div class="prism-num" style="text-align:left;margin-top:.35rem">'
             f'{html.escape(q["id"])}</div></td>',
             f'<td>{_md_bold(q["question"])}</td>',
-            f'<td>{_md_bold(q["expected_answer"])}</td>',
+            f'<td>{_md_bold(q["answer"])}</td>',
             f'<td>{_md_bold(result["answer"])}</td>',
             f'<td>{_md_bold(verdict.get("comment") or "")}</td>',
             f'<td class="prism-doc">{html.escape(result["resolved_doc"] or "unscoped")}'
@@ -942,55 +945,40 @@ def render_detail(run: dict):
             st.caption("AI resolution declined — no candidate matched: "
                       + "; ".join(detail.get("missing_evidence") or ["no reason given"]))
 
+    # Gold and PRISM are reduced to the SAME three sections - answer, formula,
+    # evidence - via the exact helpers judge.score() itself uses, so what a
+    # reader compares here on screen is what actually got judged, not a
+    # second, independently-drifting display shape. A custom question has no
+    # gold reference at all, so its "gold" side is just the placeholder text
+    # with nothing to derive a formula/evidence from.
+    gold = ({"answer": q["answer"], "formula": None, "evidence": []}
+           if q["id"] == "custom" else judge.gold_sections(q))
+    prism = judge.prism_sections(result)
+
     with st.container(border=True, key="answer-card"):
         st.markdown(f"### {q['question']}")
         cols = st.columns(2)
-        with cols[0]:
-            st.caption("Custom question — no reference" if q["id"] == "custom"
-                      else "Gold answer")
-            if q["id"] == "custom":
-                st.write(plain_prose(q["expected_answer"]))
-            else:
-                # concept/formula/evidence are ftsprism-native fields (see
-                # eval/corpora/ftsprism.py's questions()) - absent for any
-                # corpus that doesn't carry them, so each line only appears
-                # when there's something real to show. Shown inline, not
-                # tucked in an expander - there's room for it, and it's the
-                # whole point of a gold answer: it should be checkable at a
-                # glance, not one more click away. Deliberately NOT showing
-                # keywords/tags here - those are retrieval-demo plumbing, not
-                # part of what the gold answer actually asserts.
-                gold_lines = []
-                if q.get("concept"):
-                    gold_lines.append(f"concept: {q['concept']}")
-                if q.get("formula"):
-                    gold_lines.append(f"formula: {q['formula']}")
-                gold_lines.append(f'expected_answer: "{q["expected_answer"]}"')
-                evidence = q.get("evidence") or []
-                if evidence:
-                    gold_lines.append("")
-                    gold_lines.append("Evidence:")
-                    for ev in evidence:
-                        parts = [p for p in (
-                            f"Page {ev['page']}" if ev.get("page") is not None else None,
-                            ev.get("title"), ev.get("type")) if p]
-                        gold_lines.append(f"{q.get('doc_name', '')}: " + " · ".join(parts))
-                        if ev.get("text"):
-                            gold_lines.append("")
-                            gold_lines.append(ev["text"].strip())
-                st.code("\n".join(gold_lines), language=None, wrap_lines=True)
-        with cols[1]:
-            st.caption("PRISM answer")
-            st.write(plain_prose(result["answer"]))
-            # calc["computed"]'s formula is shown directly, not left to the
-            # model's own prose - deterministic and immune to whatever
-            # formatting inconsistency the model's text might have, same
-            # reasoning as the plain-prose rule in answer.py. Shown after the
-            # answer, not before - the answer is the point; the formula is
-            # the receipt for it, not a preamble to read first.
-            for c in result["calculation"].get("computed") or []:
-                st.code(f"{c['label']}: {c['formula']} = {c['value']:.4g}",
-                       language=None, wrap_lines=True)
+        for col, label, sections in (
+            (cols[0], "Custom question — no reference" if q["id"] == "custom"
+             else "Gold answer", gold),
+            (cols[1], "PRISM answer", prism),
+        ):
+            with col:
+                st.caption(label)
+                st.markdown(plain_prose(sections["answer"]))
+                # The formula box is the receipt for the answer, not a
+                # preamble to read first - shown after it, deterministic on
+                # PRISM's side (calc["computed"]'s own formula string, immune
+                # to whatever formatting inconsistency the model's prose
+                # might have - see judge.prism_sections()), omitted entirely
+                # when there is none, matching an extraction-only gold
+                # question that has no formula either.
+                if sections["formula"]:
+                    st.code(sections["formula"], language=None, wrap_lines=True)
+                if sections["evidence"]:
+                    st.caption("Evidence")
+                    st.code("\n".join(sections["evidence"]), language=None,
+                            wrap_lines=True)
         st.caption(verdict.get("comment", ""))
 
     metrics = st.columns(4, border=True)
@@ -1249,13 +1237,13 @@ with st.sidebar:
         model = config.OPENAI_MODEL
 
 if custom_question.strip():
-    # No gold reference exists for a question nobody wrote a gold
-    # answer for - expected_answer is a display string, not data judge.score
-    # runs against; run_one() checks question["id"] == "custom" and skips
-    # scoring entirely rather than judging against this placeholder text.
+    # No gold reference exists for a question nobody wrote a gold answer for -
+    # answer is a display string, not data judge.score runs against;
+    # run_one() checks question["id"] == "custom" and skips scoring entirely
+    # rather than judging against this placeholder text.
     selected_question = {
-        "id": "custom", "question": custom_question.strip(), "doc_name": None,
-        "expected_answer": "— (custom question, no benchmark reference)",
+        "id": "custom", "question": custom_question.strip(), "doc_names": [],
+        "answer": "— (custom question, no benchmark reference)",
         "company": "3M",
     }
 else:
@@ -1434,8 +1422,8 @@ with tab_ask:
                     st.caption("Custom question · not scored — doc resolution runs "
                               "normally, there is just no reference to grade against")
                 else:
-                    st.caption(f"{selected_question['id']} · expected document: "
-                              f"{selected_question['doc_name']}")
+                    st.caption(f"{selected_question['id']} · expected document(s): "
+                              f"{', '.join(selected_question['doc_names'])}")
             else:
                 st.markdown(f"#### Run all {len(company_questions)} {scope} questions")
                 st.caption("The results dashboard will compare the gold answer and PRISM's answer.")

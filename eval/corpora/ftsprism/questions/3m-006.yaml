@@ -1,0 +1,39 @@
+number: 6
+title: Quick Ratio — Q3 2022
+
+category: governed-formula
+
+doc_names:
+  - 3M_2022_Q3_10Q
+
+question: >
+  What was 3M's quick ratio at the end of the third quarter of 2022?
+
+answer: |
+  3M's quick ratio at the end of the third quarter of 2022 was **0.97**
+  (precisely 0.9724): (total current assets − total inventories) / total
+  current liabilities = ($14,895M − $5,615M) / $9,543M = 0.9724.
+
+formula: (total_current_assets - inventory) / total_current_liabilities
+
+evidence:
+  - "3M_2022_Q3_10Q: Page 10 · Consolidated Balance Sheet · table"
+
+verified: false
+
+notes: >
+  14,895 - 5,615 = 9,280; 9,280 / 9,543 = 0.9724 - matches the 0.97 expected
+  answer exactly.
+
+  This is the concept the dictionary's approved "Quick Ratio · Preferred ·
+  Acid-Test" entry governs (same formula, verified live against the running
+  app's Dictionary & concepts tab) - category is governed-formula, not
+  single-doc-computed, because an approved entry decides the convention
+  here rather than the model proposing candidates.
+
+  Not yet human-verified against the actual filing (verified: false,
+  carried over unchanged from the original authoring) - flip once checked.
+
+  Renumbered from 3m-2022-q3-quick-ratio.yaml and migrated from the
+  pre-doc_names/answer schema 2026-09-11; authored 2026-09-06
+  (claude+prasad, prism-assisted).

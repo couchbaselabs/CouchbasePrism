@@ -65,22 +65,30 @@ def main():
             result = runtime.answer_question(q["question"], catalog_docs,
                                              dictionary_data, options=options,
                                              model=args.model)
-            verdict = judge.score(q["question"], q["expected_answer"],
-                                  result["answer"], model=args.model)
+            verdict = judge.score(q["question"], judge.gold_sections(q),
+                                  judge.prism_sections(result), model=args.model)
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
             computed = ", ".join(f"{c['label']}={c['value']:.4g}"
                                  for c in result["calculation"]["computed"])
             results.append({
                 "id": q["id"],
                 "phase": args.phase,
-                "expected_doc": q["doc_name"],
+                "expected_doc": q["doc_names"],
                 "resolved_doc": result["resolved_doc"],
-                "resolution_correct": result["resolved_doc"] == q["doc_name"],
+                # A resolved doc IN the expected set is the right check for a
+                # single document (the set has one member, same as an equality
+                # check) - but for a multi-doc-range question this FLATTERS the
+                # result: resolving to just one of, say, six named filings
+                # passes this check while answering none of the others the
+                # question actually needed. Not a meaningful signal for that
+                # category until the map/reduce pipeline (docs/adr/0002) makes
+                # "resolved" mean "resolved ALL of them", not "any one of them".
+                "resolution_correct": result["resolved_doc"] in q["doc_names"],
                 "answer_kind": result["answer_kind"],
                 "concept": result["concept"],
                 "governed": result["governed"],
                 "question": q["question"],
-                "expected_answer": q["expected_answer"],
+                "expected_answer": q["answer"],
                 "answer": result["answer"],
                 "bound_facts": result["bound_facts"],
                 "calculation": result["calculation"],

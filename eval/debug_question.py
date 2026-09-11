@@ -43,8 +43,8 @@ def main():
     rule("QUESTION")
     print(f"id       : {question['id']}")
     print(f"question : {question['question']}")
-    print(f"expected : {question['expected_answer']}")
-    print(f"expected document: {question['doc_name']}")
+    print(f"expected : {question['answer']}")
+    print(f"expected document(s): {question['doc_names']}")
 
     # Capture at the external-boundary level so this is the actual execution,
     # not a second debug implementation that can drift from the benchmark.
@@ -54,11 +54,15 @@ def main():
         result = runtime.answer_question(question["question"], catalog_docs,
                                          dictionary_data, options=phases.get(args.phase),
                                          model=args.model)
-        verdict = judge.score(question["question"], question["expected_answer"],
-                              result["answer"], model=args.model)
+        verdict = judge.score(question["question"], judge.gold_sections(question),
+                              judge.prism_sections(result), model=args.model)
 
     rule("CATALOG — document resolution")
-    ok = result["resolved_doc"] == question["doc_name"]
+    # A resolved doc IN the expected set flatters a multi-doc-range question
+    # (resolving one of several named filings is not "resolved") - see the
+    # same note in run_benchmark.py. Not meaningful for that category until
+    # map/reduce (docs/adr/0002) exists.
+    ok = result["resolved_doc"] in question["doc_names"]
     print(f"resolved : {result['resolved_doc']}  {'✓' if ok else '✗ MISMATCH'}")
 
     rule("EVIDENCE PLAN (no dictionary needed)")

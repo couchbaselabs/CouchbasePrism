@@ -1,4 +1,10 @@
-doc_name: 3M_2024_10K
+number: 5
+title: Working Capital Growth FY2023 → FY2024
+
+category: single-doc-computed
+
+doc_names:
+  - 3M_2024_10K
 
 question: >
   By what percentage did 3M's working capital increase between
@@ -6,65 +12,38 @@ question: >
   non-GAAP definition, and what balance-sheet changes did management
   identify as the primary drivers?
 
-concept: working capital growth
+answer: |
+  3M's working capital increased from $1.082 billion at December 31, 2023
+  to $4.628 billion at December 31, 2024, an increase of $3.546 billion, or
+  approximately **327.7%**.
+
+  Management attributed the increase primarily to lower current
+  liabilities associated with discontinued operations, short-term
+  borrowings and current portions of long-term debt, and liabilities
+  related to the PWS settlement.
 
 formula: >
   ((current_working_capital - prior_working_capital)
   / prior_working_capital) * 100
 
-expected_answer: >
-  3M's working capital increased from $1.082 billion at December 31,
-  2023 to $4.628 billion at December 31, 2024, an increase of
-  $3.546 billion, or approximately 327.7%. Management attributed the
-  increase primarily to lower current liabilities associated with
-  discontinued operations, short-term borrowings and current portions
-  of long-term debt, and liabilities related to the PWS settlement.
-
-keywords:
-  - "working capital"
-  - "current assets"
-  - "current liabilities"
-  - "short-term borrowings"
-  - "PWS settlement"
-
-tags:
-  - numerical-reasoning
-  - time-series
-  - attribution
-  - multi-page
-  - non-gaap
-  - liquidity
-
-gold_answer:
-  value: 327.7264
-  unit: percentage
-  tolerance: 0.1
-
 evidence:
-  - page: 38
-    title: "Working capital (non-GAAP measure)"
-    type: table
-    table_name: "Working capital (non-GAAP measure)"
-    text: >
-      Current assets: $15,884 million at December 31, 2024 and
-      $16,379 million at December 31, 2023. Current liabilities:
-      $11,256 million and $15,297 million, respectively. Working
-      capital: $4,628 million and $1,082 million, respectively,
-      representing a change of $3,546 million.
+  - "3M_2024_10K: Page 38 · Working capital (non-GAAP measure) · table"
+  - "3M_2024_10K: Page 39 · Financial Condition and Liquidity · text"
 
-  - page: 39
-    title: "Financial Condition and Liquidity"
-    type: text
-    table_name: null
-    text: >
-      Working capital increased $3.5 billion compared with December 31,
-      2023 primarily driven by lower balances of current liabilities
-      principally of discontinued operations, short-term borrowings and
-      current portions of long-term debt, and current liabilities
-      relating to the PWS settlement.
+verified: false
 
-lineage:
-  method: manual-curated
-  authored_by: "codex"
-  verified: false
-  added_at: "2026-09-07"
+notes: >
+  (4,628 - 1,082) / 1,082 * 100 = 327.72%, matching the 327.7% expected
+  answer.
+
+  Current assets: $15,884M (2024) vs $16,379M (2023). Current liabilities:
+  $11,256M (2024) vs $15,297M (2023). Working capital: $4,628M vs $1,082M -
+  both years' figures come from the SAME document's own comparative
+  columns (a 10-K prints the current and prior year side by side), not two
+  separate filings, so this is single-doc-computed, not multi-doc-range.
+
+  Not yet human-verified against the actual filing (verified: false,
+  carried over unchanged from the original authoring) - flip once checked.
+
+  Migrated from the pre-doc_names/answer schema 2026-09-11; authored
+  2026-09-07 (codex, manual-curated).
