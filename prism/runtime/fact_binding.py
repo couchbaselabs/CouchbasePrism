@@ -119,11 +119,15 @@ def validate_bindings(bound: list, chunks: list) -> list:
         fact["grounded"] = not issues
         fact["binding_issues"] = issues
 
-    if len(periods) > 1:
+    if len(periods) > 1 and _distinct_time_periods(periods):
         # Facts drawn from different columns produce a number that is wrong in a
         # way no arithmetic check can detect, so the whole set is rejected -
         # excluding facts a same-quantity sibling already showed are meant to
-        # span periods.
+        # span periods. _distinct_time_periods() is the gate that keeps this
+        # from firing on facts that are merely in different presentation
+        # columns of the SAME period (see its own docstring) - without it,
+        # 3M's own GAAP/adjusted-for-special-items columns looked identical
+        # to a genuine cross-period mismatch.
         for fact in bound:
             if fact.get("name") not in exempt:
                 fact["binding_issues"].append(f"facts bound to mixed periods: {sorted(periods)}")
@@ -144,6 +148,40 @@ _PERIOD_TOKENS = {"beginning", "ending", "opening", "closing", "prior",
 
 def _looks_like_period(token: str) -> bool:
     return bool(token) and (bool(_YEAR_TOKEN.match(token)) or token.lower() in _PERIOD_TOKENS)
+
+
+_YEAR_IN_TEXT = re.compile(r"(19|20)\d{2}")
+
+
+def _distinct_time_periods(period_labels) -> bool:
+    """True only if the distinct `period` labels bound actually carry some
+    signal of different POINTS IN TIME - a year, a quarter marker, or a
+    generic before/after word (_PERIOD_TOKENS) - not just different
+    presentation-column wording for the SAME period.
+
+    Observed false positive (3M_2023_10K, "Operating income margin"): facts
+    bound to "Total Company GAAP amounts" and "Total Company Adjustments for
+    special items" - two COLUMNS of 3M's own non-GAAP reconciliation table
+    for one fiscal year, not two fiscal years - were rejected as mixed
+    periods, so every fact in the set came back ungrounded and nothing was
+    ever computed. Neither label contains a year, a quarter, or any of
+    _PERIOD_TOKENS - nothing in either string actually claims a different
+    time, so the mismatch below never should have fired.
+
+    This checks the LABELS, not the fact names - deliberately a different
+    axis from _period_siblings() below, which exempts a same-quantity fact
+    pair that legitimately spans periods by NAME. The two are
+    complementary: this stops a false "mixed periods" claim before it's
+    made; _period_siblings() forgives a true one already made."""
+    labels = list(period_labels)
+    years = {m.group(0) for label in labels for m in _YEAR_IN_TEXT.finditer(label)}
+    if len(years) > 1:
+        return True
+    quarters = {q.upper() for label in labels for q in re.findall(r"\bQ[1-4]\b", label, re.I)}
+    if len(quarters) > 1:
+        return True
+    tokens = {tok.lower() for label in labels for tok in re.split(r"[^A-Za-z0-9]+", label)}
+    return bool(tokens & _PERIOD_TOKENS)
 
 
 def _period_siblings(bound: list) -> set:

@@ -187,6 +187,24 @@ def test_mixed_periods_invalidate_every_binding():
     assert any("mixed periods" in i for f in bound for i in f["binding_issues"])
 
 
+def test_same_period_different_presentation_columns_are_not_mixed_periods():
+    # Observed live (3M_2023_10K, operating income margin): facts bound to
+    # "Total Company GAAP amounts" and "Total Company Adjustments for special
+    # items" - two COLUMNS of one fiscal year's own non-GAAP reconciliation
+    # table, not two fiscal years - were rejected as mixed periods, leaving
+    # nothing grounded and nothing computed. Neither label names a year, a
+    # quarter, or any of _PERIOD_TOKENS, so there is no actual signal here of
+    # two different points in time.
+    chunks = [{"text": "Net sales | 32,681\nOperating income (loss) | -9,128"}]
+    bound = runtime.validate_bindings([
+        {"name": "net_sales", "value": 32681, "period": "Total Company GAAP amounts"},
+        {"name": "operating_income_loss", "value": -9128,
+         "period": "Total Company Adjustments for special items"},
+    ], chunks)
+    assert all(f["grounded"] is True for f in bound)
+    assert not any("mixed periods" in i for f in bound for i in f["binding_issues"])
+
+
 # ------------------------------------------------------------- conclusion
 
 POLICY = {"threshold_operator": ">=", "threshold_number": 1.0}
