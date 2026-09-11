@@ -22,8 +22,13 @@ PLAIN_PROSE_RULE = (
 
 STRUCTURE_RULE = (
     "When the question asks for an enumeration and the source presents it as table "
-    "rows, list one item per line instead of burying them in a sentence; otherwise "
-    "answer in ordinary prose. Three things matter beyond appearance:\n"
+    "rows, use an actual markdown list - one line per item, each starting with "
+    "\"- \" - instead of burying them in a sentence; otherwise answer in ordinary "
+    "prose. A bare newline between items is not enough: the renderer collapses a "
+    "single line break into a space (verified live - a plain one-per-line answer "
+    "with no \"- \" marker rendered back as one run-on sentence), so the leading "
+    "\"- \" is what actually produces separate lines, not a stylistic choice. Three "
+    "things matter beyond appearance:\n"
     "- Use the source's own printed row labels verbatim (\"Nontaxable or nondeductible "
     "items\", not \"non-deductible expenses\") - this is what makes an answer "
     "auditable line-by-line against the filing.\n"
