@@ -11,6 +11,14 @@ question: >
   GAAP basis, and explain the primary special charge driver that caused it
   to decline compared to FY2022.
 
+intent: >
+  The driver is a specific named litigation charge stated in prose pages
+  away from the income statement's own numbers, not a generic "expenses
+  rose" gloss. A system that cannot bind a financial-statement figure
+  together with the reconciling narrative elsewhere in the filing produces
+  nothing computed at all - observed live, twice - which is a quieter
+  failure than a wrong number would be.
+
 answer: |
   3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%**
   (operating income (loss) of $(9,128) million on net sales of $32,681

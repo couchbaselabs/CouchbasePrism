@@ -11,6 +11,13 @@ question: >
   weightings were used to evaluate the business performance factor for 3M's
   Chief Executive Officer, #Michael F. Roman#?
 
+intent: >
+  The metrics and weightings are sitting right there in the retrieved
+  text - the failure mode this catches is not missing evidence, it's
+  giving up: a system that reports "the excerpts do not state this" when a
+  three-row table with three percentages was retrieved but never
+  confidently enumerated. Observed live before a synthesis prompt fix.
+
 answer: |
   Under the 2022 Annual Incentive Plan (AIP), the business performance
   factor for 3M's Chief Executive Officer, Michael F. Roman, was evaluated

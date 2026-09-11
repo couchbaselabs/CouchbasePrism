@@ -32,6 +32,22 @@ question: >
   # stated rate. Rewording to "the items" returned all nine. Ask for what you
   # actually want counted.
 
+intent: >
+  REQUIRED, one or two sentences. Audience-facing, not author-facing (that's
+  notes, below) - field staff read this aloud to explain why this question
+  is on screen. Rendered in the UI as light italics under the question.
+  #
+  # State what this question would CATCH, not what the product is good at.
+  # "Shows off hybrid search" is unfalsifiable and useless in a demo - name
+  # the SPECIFIC failure a weaker system exhibits here. If you can't name
+  # one that survives that test, the question doesn't belong in a curated
+  # corpus - flag it instead of inventing an intent for it.
+  #
+  # Example (3m-001): "The answer is nine table rows, not a summary. A
+  # system that paraphrases drops the smallest items - and the percentages
+  # then stop summing to the stated 23.8%, which reads as perfectly
+  # confident."
+
 answer: |
   Markdown. Renders in the UI, so use a table when the source is a table -
   it makes a wrong total visible at a glance.

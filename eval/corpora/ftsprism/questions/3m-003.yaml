@@ -10,6 +10,15 @@ question: >
   What was 3M's reported Adjusted Free Cash Flow Conversion for the second
   quarter of 2023, and what formula was used to derive it?
 
+intent: >
+  The release defines more than one similarly-named conversion metric side
+  by side, with different numerators and denominators. A system that grabs
+  the nearest matching label instead of the one the question actually names
+  computes a real, differently-signed number under the same metric name -
+  observed live: -0.62 instead of 122%, from confusing this "adjusted" one
+  with a plain "free cash flow conversion" defined elsewhere in the same
+  document.
+
 answer: |
   3M's reported Adjusted Free Cash Flow Conversion for Q2 2023 was **122%**,
   computed as Adjusted Free Cash Flow divided by Adjusted Net Income

@@ -12,6 +12,14 @@ question: >
   non-GAAP definition, and what balance-sheet changes did management
   identify as the primary drivers?
 
+intent: >
+  3M prints its own "working capital (non-GAAP measure)" figure directly -
+  a system that instead reconstructs working capital from its own
+  definition of the components (receivables, inventory, payables...)
+  computes a materially different, wrong-signed percentage change under
+  the same label. Observed live: two candidate formulas, one matching gold
+  at 327.7%, the other landing near -74%.
+
 answer: |
   3M's working capital increased from $1.082 billion at December 31, 2023
   to $4.628 billion at December 31, 2024, an increase of $3.546 billion, or

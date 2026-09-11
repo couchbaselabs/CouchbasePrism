@@ -957,6 +957,12 @@ def render_detail(run: dict):
 
     with st.container(border=True, key="answer-card"):
         st.markdown(f"### {q['question']}")
+        # Audience-facing, not author-facing (that's notes - never rendered):
+        # field staff read this aloud to explain why this question is on
+        # screen. Absent for a custom question, which has no gold entry to
+        # carry one.
+        if q.get("intent"):
+            st.caption(f"*{q['intent']}*")
         cols = st.columns(2)
         for col, label, sections in (
             (cols[0], "Custom question — no reference" if q["id"] == "custom"
@@ -1418,6 +1424,11 @@ with tab_ask:
             st.caption("Selected question" if selected_question else "Benchmark run")
             if selected_question:
                 st.markdown(f"#### {selected_question['question']}")
+                # The moment a presenter reads this aloud to set up why the
+                # question is on screen, before clicking Run - see the note
+                # on intent in render_detail(), below.
+                if selected_question.get("intent"):
+                    st.caption(f"*{selected_question['intent']}*")
                 if selected_question["id"] == "custom":
                     st.caption("Custom question · not scored — doc resolution runs "
                               "normally, there is just no reference to grade against")

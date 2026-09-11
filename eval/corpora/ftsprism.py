@@ -19,6 +19,11 @@ all optional - a consumer must tolerate their absence:
     category     one of single-doc-extraction, single-doc-computed,
                  governed-formula, phrase-precision, concept-semantic,
                  multi-doc-range - see _TEMPLATE.yaml for what each means.
+    intent       one or two sentences, audience-facing (a UI renders it,
+                 field staff read it aloud) - why this question is on
+                 screen, stated as what it would CATCH in a weaker system,
+                 not what PRISM is good at. Distinct from notes, below,
+                 which is author-facing and never rendered.
     formula      the exact expression that produces `answer`, or None for a
                  direct-extraction question. Identifier-based (e.g.
                  "(total_current_assets - inventory) / total_current_liabilities"),
@@ -63,6 +68,7 @@ def _load_question(path: pathlib.Path, doc_lookup: dict) -> dict:
         "title": data.get("title"),
         "category": data.get("category"),
         "question": (data.get("question") or "").strip(),
+        "intent": (data.get("intent") or "").strip(),
         "answer": str(data.get("answer") or "").strip(),
         "doc_names": doc_names,
         "company": doc.get("company"),

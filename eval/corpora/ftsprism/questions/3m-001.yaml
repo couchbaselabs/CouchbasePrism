@@ -13,6 +13,11 @@ question: >
   What was 3M's effective tax rate for fiscal 2025, and what were the items
   reconciling it to the U.S. federal statutory rate?
 
+intent: >
+  The answer is nine table rows, not a summary. A system that paraphrases
+  drops the smallest items - and the percentages then stop summing to the
+  stated 23.8%, which reads as perfectly confident.
+
 answer: |
   3M's effective worldwide tax rate for fiscal 2025 was **23.8%**.
 

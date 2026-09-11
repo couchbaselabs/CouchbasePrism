@@ -9,6 +9,14 @@ doc_names:
 question: >
   What was 3M's quick ratio at the end of the third quarter of 2022?
 
+intent: >
+  Quick ratio has multiple materially different, individually defensible
+  conventions - excluding just inventory, or also prepaids, or building
+  quick assets from cash + securities + receivables instead - that land on
+  different sides of a "healthy" threshold. An ungoverned system picks one
+  silently; this is the case an approved dictionary entry exists to lock
+  down instead of leaving to chance on every run.
+
 answer: |
   3M's quick ratio at the end of the third quarter of 2022 was **0.97**
   (precisely 0.9724): (total current assets − total inventories) / total
