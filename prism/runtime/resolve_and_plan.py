@@ -95,7 +95,21 @@ RESOLUTION (part 1):
 - years_partial still counts as coverage, unless the question specifically
   needs a COMPLETE annual filing.
 - Leave doc_types/years/quarters EMPTY when the question doesn't imply
-  one - empty means "any", not "none".
+  one - empty means "any", not "none". A guess about which FORM TYPICALLY
+  CARRIES a kind of content is not the question implying one - it is you
+  inventing a constraint the question never stated, and the two documents
+  covering the identical quarter are not interchangeable, so guessing
+  wrong silently answers from the wrong one. Observed live: asked for
+  "Adjusted Free Cash Flow Conversion" (no document type named), this
+  narrowed doc_types to ["10-Q"] with the reasoning "non-GAAP quarterly
+  measures... are typically presented" there - a plausible-sounding guess
+  that was simply wrong; that metric's own formula is in the earnings
+  release 8-K's supplemental non-GAAP table, not the 10-Q. A metric's
+  NAME or NATURE (non-GAAP, "Adjusted X", a ratio, a segment breakdown...)
+  is never grounds to narrow doc_types by itself - only the question
+  itself naming a form ("in the 10-Q", "per the earnings release") does.
+- If no company plausibly matches, return companies empty, selection_complete
+  false, and say what's missing - never guess the closest name.
 - If no company plausibly matches, return companies empty, selection_complete
   false, and say what's missing - never guess the closest name.
 
