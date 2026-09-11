@@ -96,19 +96,25 @@ def prism_sections(result: dict) -> dict:
     the same deterministic data the trace UI already displays, not a second
     LLM call re-describing them. formula is None (matching a gold question
     with no formula) when nothing was computed - an extraction-only answer
-    has nothing to show there either."""
+    has nothing to show there either.
+
+    Evidence lines are numbered [1], [2], ... in the SAME order
+    fact_binding.format_chunks() numbers them for the synthesis prompt -
+    the answer's own [5]-style citations refer to that position, so the
+    evidence list has to carry the same numbers or a citation has nothing
+    to point at."""
     calc = result.get("calculation") or {}
     computed = calc.get("computed") or []
     formula = ("\n".join(f"{c['label']}: {c['formula']} = {c['value']:.4g}"
                          for c in computed) or None)
     doc = result.get("resolved_doc") or "?"
     evidence = []
-    for c in result.get("chunks") or []:
+    for i, c in enumerate(result.get("chunks") or [], 1):
         parts = [p for p in (
             f"Page {c['page']}" if c.get("page") is not None else None,
             " / ".join(c.get("titles") or []) or None,
             c.get("type")) if p]
-        evidence.append(f"{doc}: " + " · ".join(parts))
+        evidence.append(f"[{i}] {doc}: " + " · ".join(parts))
     return {"answer": result.get("answer") or "", "formula": formula, "evidence": evidence}
 
 
