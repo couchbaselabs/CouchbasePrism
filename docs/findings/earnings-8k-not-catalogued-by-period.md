@@ -1,7 +1,45 @@
-**Status:** open, not yet fixed — found live during gold-question testing,
-2026-09-11, deliberately written up rather than patched on the spot (same
-"note it, don't guess a fix" treatment as
-`docs/findings/duplicate-year-tables-no-disambiguation.md`).
+**Status:** the catalog gap this doc describes is FIXED (see "Fix" below) -
+`company`/`period_end_date_iso` are now populated for all 31 earnings 8-Ks.
+3m-003 STILL does not resolve to the right document, but for a different,
+later-stage reason: two same-period documents of different form now
+correctly both match, and there is no tie-break between them - see
+"What's still open" below. That remainder is deliberately not being patched
+here; it is `docs/adr/0002-multi-document-retrieval.md` territory, still
+`status: proposed`, awaiting review before any of it gets built.
+
+## Fix
+
+`extraction.py` gained two deterministic fallbacks, following the exact
+pattern `doc_type_from_doc_name()`/`period_from_doc_name()` already used for
+this same document class:
+
+- `company_from_doc_name()` - the doc_name's own leading segment ("3M" from
+  "3M_8K_...") mapped to the manifest's canonical form ("3M COMPANY").
+- `period_end_from_earnings_headline()` - the press-release headline states
+  a fiscal quarter directly ("3M Reports Second Quarter 2023 Results"); two
+  tiers, because real headlines turned out messier than one shape: a year
+  printed adjacent to the quarter word first, falling back to the filed
+  date already in the document's own name (adjusted -1 year for a Q4/
+  full-year release, which files in January of the FOLLOWING year) when no
+  adjacent year is stated.
+
+Verified: rebuilt the whole 3M catalog (`manage.py build-catalog`), all 31
+earnings 8-Ks now carry both fields; `resolve_documents(["3M COMPANY"], [],
+[2023], [2])` correctly returns BOTH `3M_2023_Q2_10Q` and
+`3M_8K_2023-07-25_000056_earnings` where before it returned only the 10-Q.
+6 new regression tests added to `tests/test_catalog_and_runtime.py`.
+
+## What's still open
+
+`pipeline.py`'s document-picking sort (`sorted(..., key=(doc_period,
+quarter), reverse=True)`) has no tie-breaker for two documents that share a
+period but differ in form - a stable sort over an inherently unordered N1QL
+result, so whichever the server happened to return first silently wins.
+This was always latent; the catalog fix above is what makes it visible for
+the first time (previously only ONE document - the 10-Q - ever matched at
+all). Deliberately not addressed here - see
+`docs/adr/0002-multi-document-retrieval.md` for the actual multi-document
+design this belongs to.
 
 # Earnings-release 8-Ks are never catalogued by period - none of them
 
@@ -70,26 +108,26 @@ already-diagnosed-and-partly-fixed layers sit in front of this one:
 So the resolver reasoning is now correct, and it still cannot reach the
 right document - the gap is entirely in catalog data, not in any prompt.
 
-## Not yet a fix - open questions for whoever picks this up
+## How the open questions above were resolved
 
-- The filed date is already IN the document's own name
-  (`3M_8K_2023-07-25_000056_earnings` - filed 2023-07-25). Could
-  `period_end_date_iso` be inferred from the filed date for this document
-  class specifically (an earnings release files ~3-4 weeks after quarter
-  end, a fairly reliable convention), or is that too fragile/off-by-a-
-  reporting-lag to trust for quarter matching?
-  - `resolve_documents()`'s quarter filtering can hover the intended period
-    if it uses the FILED date's own quarter/month directly rather than a
-    derived fiscal period end.
-- Is a separate classification prompt (looking for a press-release-style
-  headline - "Reports Second-Quarter 2023 Results" - instead of SEC
-  boilerplate) worth a dedicated extraction path for this document class,
-  given it's a real, recurring shape (31 of them, and presumably every
-  future earnings-release 8-K added to this corpus)?
-- `company` is also null for all 31 - does anything currently depend on it
-  for earnings 8-Ks specifically, or is it only used as a convenience
-  filter (per `documents.yaml`'s own note) that happens not to matter here
-  since this corpus is single-company?
+- The filed date alone was NOT trusted for the period end (it's a reporting
+  lag - "2023-07-25" for a Q2 release would wrongly imply Q3 if read as a
+  period end directly). It IS trusted for the YEAR, as tier 2's fallback,
+  since it's reliable specifically for that: same calendar year for a
+  Q1-Q3 release, one year prior for a Q4/full-year release filed in
+  January.
+- A separate extraction PROMPT path (LLM-based) was considered and
+  rejected in favor of a plain regex fallback, same reasoning
+  `doc_type_from_doc_name()`/`period_from_doc_name()` already used: the
+  headline shape is regular enough (an ordinal + "quarter", optionally
+  hyphenated) that no LLM judgment is needed, and a deterministic fallback
+  can't hallucinate a quarter that isn't there the way an LLM prompt
+  extension risked.
+- `company` was fixed too (`company_from_doc_name()`) - it turned out NOT
+  to be a pure convenience filter: `resolve_documents()`'s own query
+  requires `UPPER(d.company.value) IN $companies` unconditionally, so a
+  null company independently excluded every earnings 8-K from any query
+  regardless of the period fix.
 
 ## Reproduction
 

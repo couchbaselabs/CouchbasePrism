@@ -204,6 +204,78 @@ def doc_type_from_doc_name(doc_name: str):
     return _NAME_FORM_CANONICAL.get(match.group(1)) if match else None
 
 
+_NAME_COMPANY_PREFIX = re.compile(r"^([A-Za-z0-9]+)_")
+_COMPANY_CANONICAL = {"3M": "3M COMPANY"}
+
+
+def company_from_doc_name(doc_name: str):
+    """A company for documents whose cover page never states one -
+    earnings-release 8-Ks are a company's own press release, not an SEC
+    cover page, and print no "(Exact name of registrant as specified in its
+    charter)" language at all for classify_cover to find. The document name
+    already carries the company - this corpus's own naming convention
+    (documents.yaml's own doc_name prefix, not the LLM's classification) -
+    so it is used as a fallback and recorded as such, same reasoning as
+    period_from_doc_name/doc_type_from_doc_name above.
+
+    Mapped through _COMPANY_CANONICAL rather than returned raw: this must
+    match resolve_documents()'s own UPPER(d.company.value) IN $companies
+    comparison against the manifest's canonical company name ("3M COMPANY"),
+    not whatever casing/spelling the doc_name prefix happens to use."""
+    match = _NAME_COMPANY_PREFIX.match(doc_name or "")
+    return _COMPANY_CANONICAL.get(match.group(1)) if match else None
+
+
+_QUARTER_WORD = re.compile(r"\b(first|second|third|fourth)[\s-]+quarter\b", re.IGNORECASE)
+_QUARTER_YEAR_ADJACENT = re.compile(
+    r"\b(first|second|third|fourth)[\s-]+quarter\s+((?:19|20)\d{2})\b", re.IGNORECASE)
+_FILED_DATE_IN_NAME = re.compile(r"_((?:19|20)\d{2})-(\d{2})-\d{2}_")
+_QUARTER_WORD_TO_NUM = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+_QUARTER_END_MONTH_DAY = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+
+
+def period_end_from_earnings_headline(text: str, doc_name: str = None):
+    """A period_end_date for an earnings-release 8-K, whose own headline
+    states a fiscal quarter - not the SEC-standard "for the ... period
+    ended [DATE]" phrase classify_cover looks for, which this document
+    genuinely does not contain (it is a press release, not a filing cover
+    page - see docs/findings/earnings-8k-not-catalogued-by-period.md).
+
+    Two tiers, tried in order - real headline text turned out messier than
+    one fixed shape:
+    1. A year printed directly adjacent to the quarter word ("3M Reports
+       Second Quarter 2023 Results") - the cleanest shape, no ambiguity
+       about which year it names.
+    2. A quarter word with NO adjacent year ("3M Delivers Strong
+       Second-Quarter Results; Company Updates Full-Year 2024 Earnings
+       Guidance" - "2024" there names the GUIDANCE year, not necessarily
+       this release's own reporting year, so grabbing the nearest year
+       in the text is a guess this deliberately does not make). The filed
+       date already in the document's own name gives the year instead -
+       reliable because a Q1-Q3 earnings release files in the SAME
+       calendar year it reports on, and a Q4/full-year release files in
+       January (twice observed: "Fourth-Quarter and Full-Year 2020
+       Results" filed 2021-01-26; "...2021 Results" filed 2022-01-25) - so
+       a fourth-quarter mention with a January/February filed date means
+       the quarter itself is the PRIOR year. Never used for the month/day
+       directly (a filed date is a reporting lag, not a period end).
+    """
+    adjacent = _QUARTER_YEAR_ADJACENT.search(text or "")
+    if adjacent:
+        quarter = _QUARTER_WORD_TO_NUM[adjacent.group(1).lower()]
+        year = int(adjacent.group(2))
+    else:
+        word = _QUARTER_WORD.search(text or "")
+        filed = _FILED_DATE_IN_NAME.search(doc_name or "")
+        if not word or not filed:
+            return None
+        quarter = _QUARTER_WORD_TO_NUM[word.group(1).lower()]
+        filed_year, filed_month = int(filed.group(1)), int(filed.group(2))
+        year = filed_year - 1 if (quarter == 4 and filed_month <= 2) else filed_year
+    month, day = _QUARTER_END_MONTH_DAY[quarter]
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
 def fiscal_year(iso_date: str):
     """The fiscal year a period-end date belongs to.
 
@@ -268,7 +340,7 @@ def _search_label(company: str, doc_type: str, doc_period, period_end_date_iso: 
 
 def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
                    extractor: str = "pymupdf-sort+closed-set-classification",
-                   source_filename: str = None) -> dict:
+                   source_filename: str = None, cover_text: str = None) -> dict:
     """Only the fields something actually reads.
 
     Each extracted field keeps its {value, confidence, source_span} envelope
@@ -286,6 +358,15 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
     the catalog broke nothing, because retrieval now reads this instead of
     recomputing. Absent (None) for a document built via build_from_pdf, which
     has no S3-derived storage location to record.
+
+    `cover_text` is the same raw text classify_cover() was given - passed
+    through separately (not re-derived from `extraction`) so
+    period_end_from_earnings_headline() can search it directly, the same
+    reasoning as the doc_name fallbacks below: an earnings-release 8-K's
+    headline ("3M Reports Second Quarter 2023 Results") is real text the
+    document actually contains, just not the SEC-boilerplate phrase
+    classify_cover's own prompt looks for - see
+    docs/findings/earnings-8k-not-catalogued-by-period.md.
     """
     period = extraction.get("period_end_date", {})
     raw = period.get("value")
@@ -301,16 +382,25 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
         fallback = doc_type_from_doc_name(doc_name)
         if fallback:
             doc_type = {**doc_type, "value": fallback, "source": "doc_name"}
+    company = extraction.get("company") or {}
+    if not company.get("value"):
+        # Same reasoning as doc_type above - an earnings-release 8-K is a
+        # press release, not an SEC cover page, and prints no "(Exact name
+        # of registrant as specified in its charter)" language at all.
+        fallback = company_from_doc_name(doc_name)
+        if fallback:
+            company = {**company, "value": fallback, "source": "doc_name"}
+    period_end_iso = (to_iso_date(raw)
+                      or period_end_from_earnings_headline(cover_text, doc_name))
     document = {
         "doc_id": doc_name,
         "doc_name": doc_name,
         "type": "catalog_document",
-        "company": extraction.get("company"),
+        "company": company,
         "doc_type": doc_type,
         "period_end_date": period,
-        "period_end_date_iso": to_iso_date(raw),
-        "doc_period": (fiscal_year(to_iso_date(raw))
-                       or period_from_doc_name(doc_name)),
+        "period_end_date_iso": period_end_iso,
+        "doc_period": fiscal_year(period_end_iso) or period_from_doc_name(doc_name),
         "lineage": {
             "extractor": extractor,
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -330,17 +420,20 @@ def build_document(doc_name: str, extraction: dict, gics_sector: str = None,
 
 def build_from_pdf(pdf_path: str, doc_name: str, model: str = None,
                    gics_sector: str = None) -> dict:
-    return build_document(doc_name, classify_cover(cover_text(pdf_path), model=model),
-                          gics_sector=gics_sector)
+    text = cover_text(pdf_path)
+    return build_document(doc_name, classify_cover(text, model=model),
+                          gics_sector=gics_sector, cover_text=text)
 
 
 def build_from_chunks(doc_name: str, model: str = None, gics_sector: str = None,
                       pages: int = COVER_PAGES, scope: str = None) -> dict:
     """Same classification, sourced from already-ingested chunks instead of
     the PDF. This is the path that needs no local PDF file at all."""
+    text = cover_text_from_chunks(doc_name, pages, scope=scope)
     return build_document(
         doc_name,
-        classify_cover(cover_text_from_chunks(doc_name, pages, scope=scope), model=model),
+        classify_cover(text, model=model),
+        cover_text=text,
         gics_sector=gics_sector,
         extractor="chunks-sort+closed-set-classification",
         source_filename=config.source_filename(doc_name, scope=scope))

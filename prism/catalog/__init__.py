@@ -27,8 +27,9 @@ semantic search happens.
 from .extraction import (  # noqa: F401
     CLASSIFY_SYSTEM_PROMPT, COVER_PAGES, FIELDS,
     apply_grounding_check, build_document, build_from_chunks, build_from_pdf,
-    classify_cover, cover_text, cover_text_from_chunks, doc_type_from_doc_name,
-    fiscal_year, period_from_doc_name, quarter_of, to_iso_date, year_of,
+    classify_cover, company_from_doc_name, cover_text, cover_text_from_chunks,
+    doc_type_from_doc_name, fiscal_year, period_end_from_earnings_headline,
+    period_from_doc_name, quarter_of, to_iso_date, year_of,
 )
 from .aliases import ALIAS_SYSTEM_PROMPT, propose_aliases  # noqa: F401
 from .repository import (  # noqa: F401

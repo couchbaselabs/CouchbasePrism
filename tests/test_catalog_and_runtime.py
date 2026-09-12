@@ -32,6 +32,85 @@ def test_partial_date_is_left_unparsed_rather_than_invented():
     assert catalog.to_iso_date("March 2021") is None
 
 
+# ---------------------------------------------- earnings-8K catalog fallbacks
+
+def test_company_from_doc_name_matches_the_manifest_canonical_form():
+    # Must match resolve_documents()'s own UPPER(d.company.value) IN
+    # $companies comparison against the manifest's "3M COMPANY", not
+    # whatever casing the doc_name prefix itself happens to use.
+    assert catalog.company_from_doc_name("3M_8K_2023-07-25_000056_earnings") == "3M COMPANY"
+
+
+def test_company_from_doc_name_none_for_an_unknown_prefix():
+    assert catalog.company_from_doc_name("Unknown_8K_2023_earnings") is None
+
+
+def test_period_end_from_earnings_headline_maps_calendar_quarter_end():
+    # Live case: 3M_8K_2023-07-25_000056_earnings's own headline states
+    # "Second Quarter 2023" directly - the year is adjacent, tier 1.
+    text = "3M Reports Second Quarter 2023 Results\n\nST. PAUL, Minn. – July 25, 2023"
+    assert catalog.period_end_from_earnings_headline(text) == "2023-06-30"
+
+
+def test_period_end_from_earnings_headline_covers_all_four_quarters():
+    for word, iso in [("First", "2024-03-31"), ("Second", "2024-06-30"),
+                      ("Third", "2024-09-30"), ("Fourth", "2024-12-31")]:
+        text = f"3M Reports {word} Quarter 2024 Results"
+        assert catalog.period_end_from_earnings_headline(text) == iso
+
+
+def test_period_end_from_earnings_headline_none_without_a_quarter_statement():
+    assert catalog.period_end_from_earnings_headline("3M announces a new product") is None
+
+
+def test_period_end_from_earnings_headline_falls_back_to_filed_year_when_no_adjacent_year():
+    # Live case: "3M Delivers Strong Second-Quarter Results; Company
+    # Updates Full-Year 2024 Earnings Guidance" - "2024" there names the
+    # GUIDANCE, not necessarily this release's own year, so grabbing the
+    # nearest year in the text would be a guess. The filed date (tier 2)
+    # gives 2024 correctly since this is a Q1-Q3 release, filed the same
+    # calendar year it reports on.
+    text = ("3M Delivers Strong Second-Quarter Results; Company Updates "
+            "Full-Year 2024 Earnings Guidance")
+    assert catalog.period_end_from_earnings_headline(
+        text, "3M_8K_2024-07-26_000077_earnings") == "2024-06-30"
+
+
+def test_period_end_from_earnings_headline_fourth_quarter_is_the_prior_filed_year():
+    # Live case: "3M Reports Fourth-Quarter and Full-Year 2020 Results"
+    # (hyphenated, year separated from "Quarter" by "and Full-Year" - not
+    # tier-1 adjacent) filed 2021-01-26 - a Q4/full-year release files in
+    # January of the FOLLOWING year, so the quarter itself is 2020, not
+    # the filed year 2021.
+    text = "3M Reports Fourth-Quarter and Full-Year 2020 Results"
+    assert catalog.period_end_from_earnings_headline(
+        text, "3M_8K_2021-01-26_007403_earnings") == "2020-12-31"
+
+
+def test_period_end_from_earnings_headline_no_filed_date_and_no_adjacent_year_is_none():
+    assert catalog.period_end_from_earnings_headline(
+        "3M Delivers Strong Second-Quarter Results", None) is None
+
+
+def test_build_document_falls_back_to_headline_and_doc_name_together():
+    # The combined case that was silently broken live: an earnings-release
+    # 8-K whose cover text carries no SEC boilerplate at all - company,
+    # period_end_date_iso and doc_period all need their own fallback, or
+    # resolve_documents()'s UPPER(d.company.value) IN $companies and
+    # quarter_of(period_end_date_iso) both silently exclude the document
+    # from every query, regardless of how the resolver reasons about
+    # document type.
+    doc = catalog.build_document(
+        "3M_8K_2023-07-25_000056_earnings",
+        {"company": {"value": None}, "doc_type": {"value": None},
+         "period_end_date": {"value": None}},
+        cover_text="3M Reports Second Quarter 2023 Results\n\nST. PAUL, Minn. – July 25, 2023")
+    assert doc["company"]["value"] == "3M COMPANY"
+    assert doc["doc_type"]["value"] == "8-K"
+    assert doc["period_end_date_iso"] == "2023-06-30"
+    assert doc["doc_period"] == 2023
+
+
 # -------------------------------------------------- cover text from chunks
 
 def test_chunk_sort_key_undoes_scrambled_element_ids():
