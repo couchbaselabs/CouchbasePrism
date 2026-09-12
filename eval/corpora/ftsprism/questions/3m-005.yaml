@@ -35,10 +35,10 @@ formula: >
   / prior_working_capital) * 100
 
 evidence:
-  - "3M_2024_10K: Page 38 · Working capital (non-GAAP measure) · table"
-  - "3M_2024_10K: Page 39 · Financial Condition and Liquidity · text"
+  - "3M_2024_10K: Page 76 · Working capital (non-GAAP measure) · table"
+  - "3M_2024_10K: Page 77 · Financial Condition and Liquidity · text"
 
-verified: false
+verified: true
 
 notes: >
   (4,628 - 1,082) / 1,082 * 100 = 327.72%, matching the 327.7% expected
@@ -55,3 +55,13 @@ notes: >
 
   Migrated from the pre-doc_names/answer schema 2026-09-11; authored
   2026-09-07 (codex, manual-curated).
+
+  EVIDENCE CORRECTED and VERIFIED 2026-09-11 (pages 38/39 -> 76/77) by
+  PyMuPDF text extraction. Page 76 carries "Working capital (non-GAAP
+  measure):" with all four balance figures; page 77 carries "Working capital
+  increased $3.5 billion compared with December 31, 2023 primarily driven by
+  lower balances of current liabilities principally of discontinued
+  operations, short-term borrowings and current portions of long-term debt".
+  The cited 38/39 were the filing's PRINTED folios - almost exactly half the
+  PDF index, the signature of this corpus's systematic page error.
+  verified flipped false -> true on that basis.

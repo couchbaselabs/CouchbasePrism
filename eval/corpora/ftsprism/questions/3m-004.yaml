@@ -33,7 +33,7 @@ answer: |
 formula: null
 
 evidence:
-  - "3M_2023_DEF14A: Page 72 · Executive Compensation - Overview of Compensation Program Design · table"
+  - "3M_2023_DEF14A: Page 96 · Executive Compensation - Overview of Compensation Program Design · table"
 
 verified: true
 
@@ -46,3 +46,12 @@ notes: >
 
   Migrated from the pre-doc_names/answer schema 2026-09-11; authored
   2026-09-07 (gemini+user, manual-curated).
+
+  EVIDENCE CORRECTED 2026-09-11 (page 72 -> 96), verified by PyMuPDF text
+  extraction. The 50/30/20 weightings with the individual-performance and ESG
+  modifiers appear on PDF pages 24 and 96; page 96 is cited because its
+  wording ("Individual performance multiplier") matches this answer, while
+  page 24 carries the same content in summary form and is an equally valid
+  alternative location. Page 72 was the proxy's PRINTED folio - confirmed
+  directly, since PDF page 173 cross-references "pages 72 to 74" in that same
+  printed numbering.

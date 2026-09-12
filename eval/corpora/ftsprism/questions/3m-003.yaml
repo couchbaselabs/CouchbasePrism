@@ -32,7 +32,7 @@ answer: |
 formula: (adjusted_free_cash_flow / adjusted_net_income_attributable_to_3m) * 100
 
 evidence:
-  - "3M_8K_2023-07-25_000056_earnings: Page 11 · Supplemental Financial Information - Non-GAAP Measures (Continued) · table"
+  - "3M_8K_2023-07-25_000056_earnings: Page 24 · Adjusted Free Cash Flow (non-GAAP measure) · table"
 
 verified: true
 
@@ -43,3 +43,10 @@ notes: >
 
   Migrated from the pre-doc_names/answer schema 2026-09-11; authored
   2026-09-07 (gemini+prasad, manual-curated).
+
+  EVIDENCE CORRECTED 2026-09-11 (page 11 -> 24), verified by PyMuPDF text
+  extraction. Page 24 is the only page carrying both $1,463 and $1,204; its
+  printed heading is "Adjusted Free Cash Flow (non-GAAP measure)" and it
+  states 122% / 72% / 105% / 61% across the four periods. Page 11 was the
+  release's own PRINTED page number, not the PDF page index - the same
+  systematic confusion found across this corpus.

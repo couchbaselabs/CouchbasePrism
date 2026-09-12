@@ -20,21 +20,26 @@ intent: >
   failure than a wrong number would be.
 
 answer: |
-  3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%**
-  (operating income (loss) of $(9,128) million on net sales of $32,681
-  million).
+  3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%** -
+  an operating loss of $(9,128) million on net sales of $32,681 million. The
+  filing prints this margin directly rather than leaving it to be derived.
 
-  The primary driver of the decline was special charges for significant
-  litigation: 2023 included approximately $15.2 billion pre-tax in
-  litigation costs, comprising a $10.5 billion charge for the PWS
-  Settlement and a $4.3 billion charge (inclusive of imputed interest) for
-  the Combat Arms Earplugs (CAE) Settlement.
+  The primary driver was net costs for significant litigation, which
+  accounted for **$14,869 million** of special-item charges *at the operating
+  income line*. The same item is $15,245 million at the income-before-taxes
+  line - the "approximately $15.2 billion pre-tax" the MD&A Overview cites -
+  with the $376 million difference being imputed interest and other
+  components below the operating line, which do not affect operating margin.
+  That $15.2 billion comprises the PWS Settlement ($10.5 billion) and the
+  Combat Arms Earplugs Settlement ($4.3 billion, inclusive of imputed
+  interest). Excluding all special items, adjusted operating margin was 20.3%.
 
 formula: (operating_income_loss / net_sales) * 100
 
 evidence:
+  - "3M_2023_10K: Page 47 · Certain amounts adjusted for special items (non-GAAP measures) - Total Company · table"
   - "3M_2023_10K: Page 82 · Consolidated Statement of Income (Loss) · table"
-  - "3M_2023_10K: Page 36 · Overview · text"
+  - "3M_2023_10K: Page 37 · Overview - costs for significant litigation · text"
 
 verified: true
 
@@ -53,3 +58,29 @@ notes: >
 
   Migrated from the pre-doc_names/answer schema 2026-09-11; authored
   2026-09-07 (gemini+prasad, manual-curated).
+
+  EVIDENCE CORRECTED 2026-09-11 (page 36 -> 37), verified by PyMuPDF text
+  extraction of the PDF. Page 36 is only the MD&A front matter listing the
+  eight section names; the $15.2bn / $10.5bn / $4.3bn passage is on page 37.
+  The earlier 19->36 "correction" had searched for the section NAME
+  ("Overview") rather than the passage text. Page 82 re-checked and correct.
+  Note also that the answer's litigation quote is condensed - the filing
+  reads "costs for significant litigation (see Certain amounts adjusted for
+  special items...) totaled approximately $15.2 billion pre-tax and included,
+  among other things, pre-tax charges of..." - so the earlier claim that the
+  text was "an exact match" overstated it.
+
+  REVISED 2026-09-11 after a live run surfaced a real defect in this gold.
+  The answer previously attributed the OPERATING margin decline to the
+  $15.2 billion figure. That is the PRE-TAX total (15,245 on page 47's
+  income-before-taxes column). The operating-income-line charge is 14,869;
+  the 376 difference is imputed interest and other below-the-line components
+  that cannot move operating margin. PRISM answered 14,869 and was MORE
+  precise than the gold - as previously written this file could have scored
+  a better answer as wrong.
+
+  Evidence reordered so page 47 leads. It is the only page carrying all of:
+  net sales, operating loss, the (27.9)% margin printed outright, the
+  14,869 operating-level charge, and the 20.3% adjusted margin. Page 82 has
+  the first two. The figures also appear on pages 48, 102 and 209, but those
+  carry neither the margin nor the charge and add nothing a reader needs.

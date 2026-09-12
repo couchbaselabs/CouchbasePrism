@@ -27,7 +27,7 @@ formula: (total_current_assets - inventory) / total_current_liabilities
 evidence:
   - "3M_2022_Q3_10Q: Page 10 · Consolidated Balance Sheet · table"
 
-verified: false
+verified: true
 
 notes: >
   14,895 - 5,615 = 9,280; 9,280 / 9,543 = 0.9724 - matches the 0.97 expected
@@ -45,3 +45,8 @@ notes: >
   Renumbered from 3m-2022-q3-quick-ratio.yaml and migrated from the
   pre-doc_names/answer schema 2026-09-11; authored 2026-09-06
   (claude+prasad, prism-assisted).
+
+  EVIDENCE VERIFIED 2026-09-11 by PyMuPDF text extraction: page 10 carries
+  14,895, 5,615 and 9,543 as cited - this file and 3m-002's page 82 were the
+  only two evidence locations in the inherited corpus that were already
+  correct. verified flipped false -> true.
