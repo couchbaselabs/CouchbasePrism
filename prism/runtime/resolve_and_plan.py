@@ -23,33 +23,47 @@ evidence - {concept, question, preliminary_evidence_plan} only, same
 in. Combining them removes a whole LLM round-trip for every
 derived_metric question, not a capability.
 
-Two things preserved here that the experimental prompt draft omitted -
-noted explicitly since dropping them silently would regress fixes
-already made, not just simplify the prompt:
-  1. `period_role` per required fact - without it, a multi-period formula
-     (e.g. an N-year average) has nothing to tell
-     fact_binding.validate_bindings()'s mixed-period guard "this is
-     deliberately several periods of the same quantity," and the guard
-     rejects every fact in the set.
-  2. A GENERAL form of "use structural knowledge only, never a specific
-     recalled fact" for the evidence plan - an anti-hallucination
-     discipline planner.py's own domain-free design already relied on,
-     not an anecdote.
-  `rationale` per formula and `formula_preference` are also kept (both
-  existed in the previous design, neither appeared in the experimental
-  draft - dropping either silently would have been a regression, not a
-  simplification).
-
-NOTE, latest revision: the rule guarding against guessing `doc_types`
-from a metric's typical filing type (e.g. "non-GAAP measures usually
-live in a 10-Q") - previously preserved above as item 2 - was
-DELIBERATELY DROPPED in the prompt's second iteration, per explicit
-instruction, not an oversight. That guard is exactly what
-docs/findings/earnings-8k-not-catalogued-by-period.md's "why it
-surfaced now" section credits with fixing 3m-003's doc-type guess -
-dropping it is a real, deliberate re-exposure of that failure mode
-under this experiment, to be watched for in the next eval run, not
-silently re-added.
+ITERATION HISTORY: several earlier drafts of this prompt were measured
+against the 3M gold set and rejected or revised based on what actually
+happened, not just design review:
+  - A draft that grouped several formula variables into one required_fact
+    (e.g. numerator and denominator as a single fact) broke
+    fact_binding, which only ever binds one value per fact id - the
+    second variable silently vanished, and every formula depending on
+    it went unbound. Reverted; one required_facts entry per printed
+    value (rule 7 below) is now explicit rather than left implicit.
+  - A draft that required formulas to reference variables by their own
+    identifiers (rule 9 below) fixed a real failure mode: the model
+    sometimes wrote plain-English formulas ("operating income (loss) /
+    net sales") that nothing downstream could match to bound facts.
+  - A draft with a single combined `content_anchor` STRING per fact
+    (wrapped as a one-element list) broke retrieval outright:
+    anchor_search.py matches each anchor as its own independent CONTAINS
+    substring, so combining several labels into one phrase demanded the
+    source contain that whole phrase verbatim, which real filing text
+    essentially never does - confirmed directly against main's own
+    (working) search terms on the same question. The CURRENT prompt
+    below asks for a single space-separated, deduplicated-by-stem
+    `content_anchor` again, but this time the code (see below) splits it
+    into individual words before it reaches anchor_search.py, rather
+    than passing the whole string as one anchor - a real precision
+    tradeoff (single-word anchors are looser than curated multi-word
+    labels) this prompt doesn't otherwise resolve, worth watching in
+    eval results rather than assuming settled.
+  - A draft with a detailed, multi-paragraph `content_anchor` rule full
+    of worked examples was flagged as itself gaming the eval the same
+    way the ORIGINAL production prompt's "Observed live: <company>"
+    anecdotes did - specific enough to fix one gold question's own
+    wording rather than stating a general principle. Replaced with the
+    terser, example-light rules below.
+  - The `doc_types`-guessing guard went through two different fixes:
+    first dropped to "leave doc_types empty when the question names no
+    form" (a strict no-guess rule), then changed again to "list every
+    form that could structurally carry this evidence" (rule 3 below) -
+    multi-candidate inclusion instead of either guessing one form or
+    guessing none, intended to handle documents docs/findings/
+    earnings-8k-not-catalogued-by-period.md describes (an earnings 8-K
+    and a 10-Q covering the same period) without excluding either.
 
 CONCEPTS is deliberately NOT part of this prompt at all - the morning's
 separate discussion (concepts collection as a search target, not
@@ -66,49 +80,58 @@ from ..catalog import manifest as catalog_manifest
 from ..catalog.intent import resolve_documents
 
 RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT = """\
-Extract RAG routing metadata into JSON based on the QUESTION and MANIFEST.
+Extract routing and evidence-planning metadata as JSON from the QUESTION and MANIFEST.
 
-Rules:
-1. Output ONLY valid JSON - no preamble, postscript, or code fences.
-2. `companies`, `doc_types`, `years`, and `quarters` must strictly match
-   values from MANIFEST (`[]` = any/all).
-3. `subject_words` must be an array of key words and phrases extracted
-   VERBATIM from the QUESTION string (do not derive, rephrase, or add
-   external words).
-4. `content_anchors` per required fact must be an array of SHORT,
-   independent, verbatim-likely labels (e.g. "net sales", "operating
-   income (loss)", "special charges") - each one is matched separately
-   as its own substring, so a fact is found if the source contains ANY
-   one of them, not all of them at once. Never combine several labels
-   into one long phrase or sentence - that demands the source contain
-   the whole combination verbatim, which real filing text never does.
-   Derive them from formula variables (if `derived_metric`) and the
-   verbatim `subject_words` relevant to that fact. Do NOT add generic
-   conversational fluff or filing boilerplate (e.g., "full year",
-   "consolidated statements", "results of operations").
-5. `formulas` must be an array of
-   `{"id": "...", "description": "...", "formula": "...", "rationale": "..."}`
-   objects IF `answer_kind` is `derived_metric`; otherwise `[]`. Return
-   MORE THAN ONE only when the concept has materially distinct,
-   genuinely defensible conventions - two formulas that differ only in
-   how the same inclusion is phrased are one method, not two. Never rank
-   or choose among them, and never claim the set is exhaustive. Every
-   `formula` string must reference variables by the EXACT `id` values used
-   in `required_facts` - never plain-English restatements of the concept
-   (e.g. write `operating_income_loss_2023 / net_sales_2023`, not
-   "operating income (loss) / net sales") - downstream binding matches
-   formulas to facts by these identifiers verbatim.
-6. Never compute actual values or answer the question.
-7. Evidence planning (required_facts, content_anchors, preferred_artifacts)
-   uses STRUCTURAL knowledge only - typical section names, how a concept
-   is usually labeled, what artifact usually carries it - never a
-   specific fact, figure, or named event you recall about this entity
-   from training, even where it happens to be true.
-8. `period_role` on a required fact: omit for a single-period fact;
-   otherwise a short label distinguishing which period this is (e.g.,
-   "prior" vs "current", or "fy2022_fy2023") whenever a formula or
-   query references quantities across periods, so downstream binding
-   knows multi-period facts are deliberate.
+1. Output only valid JSON matching the schema. Never compute a value, derive a
+   result, or answer the question.
+
+2. `companies`, `doc_types`, `years` and `quarters` must be copied exactly from
+   MANIFEST. `[]` means any, not none.
+
+3. Set `doc_types` from what the QUESTION itself names. If it names no form,
+   list every form that could structurally carry this evidence - never only the
+   most likely one - but respect the period granularity the QUESTION itself
+   already states: a full-year question excludes interim forms that only ever
+   cover a quarter (e.g. a 10-Q, an interim earnings release), and a
+   specific-quarter question excludes annual-only forms. This is about the
+   period the question names, never a guess about which form a KIND of metric
+   typically appears in - that guess is what this rule forbids in the first
+   place.
+
+4. `years`: the year the question asks about. A filing's own comparative column
+   covers the prior year, so a comparison against the prior year does not add
+   that year. A proxy statement (DEF 14A) is dated the year AFTER the
+   compensation year it discloses - a question about a fiscal year's executive
+   compensation, incentive plan, or director pay resolves to that year's filing
+   date, one year later than the plan or compensation year it names.
+
+5. `subject_words`: key phrases copied verbatim from the QUESTION, naming its
+   subject matter. Empty when the question names no subject matter.
+
+6. `content_anchor`: labels you expect to find PRINTED in the document - row
+   captions, table headings, a metric as a filing writes it. Never the
+   question's own words with filler removed. Preserve printed qualifiers
+   ("net", "current", "diluted", "continuing operations"). Lowercase,
+   space-separated, deduplicated by stem. Omit a term rather than invent one.
+
+7. One `required_facts` entry per value or explanation the answer needs. A fact
+   is one value a source prints on one line; if naming it requires combining or
+   netting other values, list those components instead.
+
+8. `period_role`: omit for a single-period fact. Required whenever a formula
+   names the same quantity for two or more periods, so binding knows the
+   difference is deliberate.
+
+9. `formulas`: only when `answer_kind` is `derived_metric`, otherwise `[]`.
+   Reference required-fact ids exactly. Return more than one only for
+   materially distinct, independently defensible conventions - not rephrasings
+   of one method. Never rank them, never choose between them, never claim the
+   set is complete. Set `formula_preference` only when the QUESTION names a
+   convention.
+
+10. Use structural knowledge only - how documents are typically organised, how a
+    concept is usually labelled. Never a specific figure, date or named event
+    you recall about this entity, even where it is true.
 
 Schema:
 {
@@ -119,13 +142,13 @@ Schema:
   "reasoning": "<one sentence>",
   "selection_complete": true|false,
   "missing_evidence": [],
-  "concept": "<target metric requested>",
+  "concept": "<canonical measure name only - no entity, date, or period>",
   "answer_kind": "stated_fact|derived_metric|judgment|attribution",
   "required_facts": [
     {
       "id": "<snake_case>",
       "description": "<what fact is needed>",
-      "content_anchors": ["<short verbatim-likely label>"],
+      "content_anchor": "<lowercase, space-separated, deduplicated-by-stem terms>",
       "period_role": "<omit for a single-period fact; otherwise a short label>"
     }
   ],
@@ -191,17 +214,27 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
     intent = {k: result.get(k) for k in
              ("companies", "doc_types", "years", "quarters", "reasoning",
               "selection_complete", "missing_evidence")}
-    # required_facts arrives with content_anchors already as a LIST of short,
-    # independent labels - the same shape retrieval.planner.plan_evidence()
-    # has always produced, and anchor_search.py's own CONTAINS-per-anchor
-    # matching was built around (a chunk matches if it contains ANY one
-    # anchor, not all of them). An earlier iteration of this experiment
-    # collapsed this into a single combined content_anchor STRING (wrapped
-    # here as a one-element list) to shrink the schema - measured, live,
-    # to silently break retrieval: a chunk then had to contain the whole
-    # multi-word combination verbatim, which real filing text essentially
-    # never does. No bridging is needed now; the field is used as-is.
-    required_facts = result.get("required_facts") or []
+    # required_facts arrives with the SINGULAR content_anchor this iteration's
+    # prompt asks for - "lowercase, space-separated, deduplicated by stem" -
+    # a bag-of-words description, not a verbatim phrase. anchor_search.py
+    # matches each element of content_anchors as its own independent CONTAINS
+    # substring (a chunk matches if it contains ANY one), so this is split on
+    # whitespace into that list here - each individual TERM becomes its own
+    # anchor, rather than wrapped whole as one long phrase (that was the
+    # earlier, measured-broken iteration: a chunk then had to contain the
+    # entire multi-word string verbatim, which real filing text essentially
+    # never does). This word-level split is looser than a curated list of
+    # precise multi-word labels ("operating income (loss)" becomes three
+    # separate single-word anchors here, not one phrase) - a real tradeoff
+    # against precision this prompt doesn't otherwise address, worth
+    # confirming empirically rather than assuming either way.
+    required_facts = []
+    for f in result.get("required_facts") or []:
+        if isinstance(f, dict):
+            f = dict(f)
+            anchor = f.pop("content_anchor", None)
+            f["content_anchors"] = list(dict.fromkeys((anchor or "").split()))
+        required_facts.append(f)
     plan = {"concept": result.get("concept"), "answer_kind": result.get("answer_kind"),
            "required_facts": required_facts,
            "preferred_artifacts": result.get("preferred_artifacts"),

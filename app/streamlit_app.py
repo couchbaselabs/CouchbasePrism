@@ -1004,8 +1004,26 @@ def render_detail(run: dict):
     if detail:
         picked = detail.get("selected_documents") or []
         if picked:
-            st.caption("Resolved by AI: " + "; ".join(
-                f"{d['doc_name']} — {d.get('reason', '')}" for d in picked))
+            # Group documents sharing the identical reason into one clause -
+            # resolve_and_plan.py attaches the SAME one-sentence reasoning to
+            # every document it resolves (it's one LLM call's single
+            # justification, not a per-document one), so repeating that
+            # sentence once per document just repeats it verbatim - a
+            # multi-document resolution (an annual filing plus its own
+            # interim reports, or two same-period filings of different form)
+            # could otherwise print the identical sentence four or five times
+            # in a row. Grouping still shows a genuinely distinct reason
+            # separately, if one is ever produced per document.
+            groups, order = {}, []
+            for d in picked:
+                reason = d.get("reason", "")
+                if reason not in groups:
+                    groups[reason] = []
+                    order.append(reason)
+                groups[reason].append(d["doc_name"])
+            clauses = [f"{', '.join(groups[r])} — {r}" if r else ", ".join(groups[r])
+                      for r in order]
+            st.caption("Resolved by AI: " + "; ".join(clauses))
         else:
             st.caption("AI resolution declined — no candidate matched: "
                       + "; ".join(detail.get("missing_evidence") or ["no reason given"]))
