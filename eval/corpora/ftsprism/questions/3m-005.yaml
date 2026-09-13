@@ -21,14 +21,13 @@ intent: >
   at 327.7%, the other landing near -74%.
 
 answer: |
-  3M's working capital increased from $1.082 billion at December 31, 2023
-  to $4.628 billion at December 31, 2024, an increase of $3.546 billion, or
-  approximately **327.7%**.
+  3M's working capital increased from $1.082 billion at December 31, 2023 to
+  $4.628 billion at December 31, 2024 - an increase of $3.546 billion, or
+  **327.7%**.
 
-  Management attributed the increase primarily to lower current
-  liabilities associated with discontinued operations, short-term
-  borrowings and current portions of long-term debt, and liabilities
-  related to the PWS settlement.
+  Management attributed it primarily to lower current liabilities:
+  discontinued operations, short-term borrowings and current portions of
+  long-term debt, and liabilities related to the PWS settlement.
 
 formula: >
   ((current_working_capital - prior_working_capital)
