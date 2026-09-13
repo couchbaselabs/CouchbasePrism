@@ -1,7 +1,13 @@
 # No auth gate, no TLS/reverse-proxy container - PRISM is a POC/demo/
 # learning reference architecture, not a product where those are load-
-# bearing. config.yaml is the only thing mounted in; everything else lives
-# in the image already (see Dockerfile).
+# bearing. config.yaml is read-only - it's a deploy-time secret, never
+# written by the app. skills.yaml is mounted read-write instead: the
+# Skills tab (docs/adr/0003-skills-a-domain-expert-owned-knowledge-layer.md)
+# edits it from inside the running container, and without this mount those
+# edits would live only in the container's own ephemeral filesystem and
+# vanish on the next restart/redeploy - the same reason config.yaml was
+# never baked into the image, applied to a file the app itself writes.
+# Everything else lives in the image already (see Dockerfile).
 services:
   prism:
     image: ghcr.io/couchbaselabs/couchbaseprism:${PRISM_VERSION:-latest}
@@ -10,4 +16,5 @@ services:
       - "8501:8501"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - ./skills.yaml:/app/skills.yaml
     restart: unless-stopped

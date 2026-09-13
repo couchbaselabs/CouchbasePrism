@@ -27,7 +27,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from eval import judge, phases  # noqa: E402
 from eval.corpora import load as load_corpus  # noqa: E402
 from prism import (  # noqa: E402
-    catalog, concepts, config, couchbase_io, dictionary, retrieval, runtime, trace,
+    catalog, concepts, config, couchbase_io, dictionary, retrieval, runtime, skills,
+    trace,
 )
 from prism import initialize as prism_initialize  # noqa: E402
 from prism import s3_upload  # noqa: E402
@@ -1653,7 +1654,7 @@ with tab_governance:
                "raw JSON - the two fields dictionary entries never ask for (the "
                "executable formula, its content anchors) are generated automatically "
                "on save, same as dictionary.compile always has.")
-    manage = st.segmented_control("Manage", ["Dictionary", "Concepts"],
+    manage = st.segmented_control("Manage", ["Dictionary", "Concepts", "Skills"],
                                   default="Dictionary")
 
     if manage == "Dictionary":
@@ -1814,7 +1815,7 @@ with tab_governance:
                 st.session_state.pop("editing_dict_id", None)
                 st.rerun()
 
-    else:
+    elif manage == "Concepts":
         concept_entries = concepts_data.get("entries", [])
         section("Concepts", f"{len(concept_entries)} entries in {scope}",
                ":material/travel_explore:")
@@ -1915,4 +1916,28 @@ with tab_governance:
                         st.rerun()
             if editing_concept and st.button("Cancel edit", key="concept_cancel_edit"):
                 st.session_state.pop("editing_concept_id", None)
+                st.rerun()
+
+    else:
+        skill_lines = skills.load(scope=scope)
+        section("Skills", f"{len(skill_lines)} statements in {scope}",
+               ":material/school:")
+        st.caption("Domain-expert-owned filing-mechanics knowledge - how documents "
+                  "in this domain are typically organised, which form structurally "
+                  "carries what. Appended to resolve_and_plan's own system prompt "
+                  "as-is, one plain sentence per line - never a JSON-shape rule, "
+                  "never one company's own vocabulary (that's Concepts) or an "
+                  "approved formula (that's Dictionary). See "
+                  "docs/adr/0003-skills-a-domain-expert-owned-knowledge-layer.md.")
+        with st.form("skills_form", border=False):
+            skills_text = st.text_area(
+                "One skill per line", value="\n".join(skill_lines), height=240,
+                placeholder="e.g. A proxy statement (DEF 14A) is dated the year "
+                           "after the compensation year it discloses.",
+                label_visibility="collapsed")
+            if st.form_submit_button("Save skills", icon=":material/check:",
+                                     type="primary"):
+                skills.save(skills_text.splitlines(), scope=scope)
+                st.toast(f"Saved {len([l for l in skills_text.splitlines() if l.strip()])} "
+                        "skills.", icon=":material/check_circle:")
                 st.rerun()

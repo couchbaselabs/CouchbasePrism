@@ -285,6 +285,18 @@ EMBED_MODEL = os.environ.get("MODEL_ID", "")
 DICTIONARY_PATH = pathlib.Path(
     os.environ.get("PRISM_DICTIONARY", REPO_ROOT / "dictionary.yaml"))
 
+# --- Skills ------------------------------------------------------------
+# Domain-expert-owned filing-mechanics knowledge (a proxy statement's filing
+# lag, which form structurally carries which period) - kept separate from
+# resolve_and_plan's own structural prompt rules, and from dictionary/concepts
+# (see docs/adr/0003-skills-a-domain-expert-owned-knowledge-layer.md for why).
+# A single local file, never Couchbase: skills changes are rare, industry-
+# wide edits by a domain reviewer, not the frequent per-user edits
+# dictionary/concepts are built for - this stays a file on purpose, not a
+# migration step toward a collection later.
+SKILLS_PATH = pathlib.Path(
+    os.environ.get("PRISM_SKILLS", REPO_ROOT / "skills.yaml"))
+
 # --- Retrieval tuning ------------------------------------------------------
 TOP_K = 10
 MAX_ANCHOR_CHUNKS = 6

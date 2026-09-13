@@ -64,6 +64,15 @@ happened, not just design review:
     guessing none, intended to handle documents docs/findings/
     earnings-8k-not-catalogued-by-period.md describes (an earnings 8-K
     and a 10-Q covering the same period) without excluding either.
+  - A period-granularity guard (rule 3) and a proxy-statement filing-lag
+    guard (rule 4) were both added directly into these rules the same
+    day they were discovered - and both are, in hindsight, SKILLS, not
+    structural rules (see docs/adr/0003-skills-a-domain-expert-owned-
+    knowledge-layer.md): general filing-mechanics facts a domain expert
+    should own, not something an app developer bakes into the compiler
+    prompt every time a new filing quirk surfaces. `skills_repo.render()`
+    below is the fix - filing-mechanics knowledge belongs there from now
+    on, not appended to the numbered rules.
 
 CONCEPTS is deliberately NOT part of this prompt at all - the morning's
 separate discussion (concepts collection as a search target, not
@@ -76,6 +85,7 @@ support during this experiment.
 """
 from .. import concepts as concepts_repo
 from .. import llm
+from .. import skills as skills_repo
 from ..catalog import manifest as catalog_manifest
 from ..catalog.intent import resolve_documents
 
@@ -89,21 +99,18 @@ Extract routing and evidence-planning metadata as JSON from the QUESTION and MAN
    MANIFEST. `[]` means any, not none.
 
 3. Set `doc_types` from what the QUESTION itself names. If it names no form,
-   list every form that could structurally carry this evidence - never only the
-   most likely one - but respect the period granularity the QUESTION itself
-   already states: a full-year question excludes interim forms that only ever
-   cover a quarter (e.g. a 10-Q, an interim earnings release), and a
-   specific-quarter question excludes annual-only forms. This is about the
+   list every form that could structurally carry this evidence - never only
+   the most likely one - but exclude any form that cannot structurally cover
+   the period granularity the QUESTION itself already states (SKILLS below,
+   if present, describes which forms that applies to). This is about the
    period the question names, never a guess about which form a KIND of metric
    typically appears in - that guess is what this rule forbids in the first
    place.
 
 4. `years`: the year the question asks about. A filing's own comparative column
    covers the prior year, so a comparison against the prior year does not add
-   that year. A proxy statement (DEF 14A) is dated the year AFTER the
-   compensation year it discloses - a question about a fiscal year's executive
-   compensation, incentive plan, or director pay resolves to that year's filing
-   date, one year later than the plan or compensation year it names.
+   that year. SKILLS below, if present, may describe a form whose filing date
+   differs from the period it discloses - apply that before setting `years`.
 
 5. `subject_words`: key phrases copied verbatim from the QUESTION, naming its
    subject matter. Empty when the question names no subject matter.
@@ -208,8 +215,14 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
     concepts_data = (concepts_data if concepts_data is not None
                      else concepts_repo.load(scope=scope))
     user = (f"QUESTION: {question}\n\nMANIFEST:\n{manifest}")
-    result = llm.chat_json(RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT, user, model=model,
-                           stage="resolve_and_plan")
+    # Skills (docs/adr/0003-...) are domain-expert-owned filing-mechanics
+    # facts, appended after the structural rules rather than folded into
+    # them - the rules above are this call's compiler and should stay
+    # general; anything that only ever holds for one document form or one
+    # filing convention belongs here instead, reviewed and edited by someone
+    # who need not read this file. Empty string when this scope has none.
+    system = RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT + skills_repo.render(scope=scope)
+    result = llm.chat_json(system, user, model=model, stage="resolve_and_plan")
 
     intent = {k: result.get(k) for k in
              ("companies", "doc_types", "years", "quarters", "reasoning",

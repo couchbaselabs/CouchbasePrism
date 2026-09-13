@@ -1,0 +1,15 @@
+# Skills: domain-expert-owned filing-mechanics knowledge, appended to
+# resolve_and_plan's own system prompt at runtime (prism/skills.py's
+# render()). Edited via the app's Dictionary & concepts tab (Skills) or
+# directly here - either way, plain sentences, one per line, no structured
+# fields. See docs/adr/0003-skills-a-domain-expert-owned-knowledge-layer.md
+# for what belongs here versus in resolve_and_plan.py's own rules.
+secfilings:
+  - A 10-Q or a quarterly earnings-release 8-K covers only its own quarter,
+    never a full fiscal year - exclude them as candidates for a full-year
+    question. A full-year (Q4) earnings-release 8-K or a 10-K can carry
+    full-year figures, so don't exclude an 8-K on that basis alone.
+  - A proxy statement (DEF 14A) is dated the year AFTER the compensation
+    year it discloses - a question about a fiscal year's executive
+    compensation, incentive plan, or director pay resolves to a filing
+    dated one year later than the plan year it names.
