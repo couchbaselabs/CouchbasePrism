@@ -49,8 +49,15 @@ intent: >
   # confident."
 
 answer: |
-  Markdown. Renders in the UI, so use a table when the source is a table -
-  it makes a wrong total visible at a glance.
+  ONLY the claims that must be true. Every extra clause is another thing a
+  semantic judge can disagree with, which turns a deterministic pass into a
+  coin flip - measured: a verbose gold answer passed on some runs and failed
+  on others with no change to the system. Reasoning, derivations, caveats and
+  "why this figure and not that one" belong in `notes`, which nothing scores.
+
+  Markdown. Use a table when the source is a table - it makes a wrong total
+  visible at a glance. A nine-row table is not verbose; a paragraph
+  explaining why the nine rows are the right nine rows is.
 
   Quote the source's OWN printed row labels verbatim ("Nontaxable or
   nondeductible items", not "non-deductible expenses"), and keep every

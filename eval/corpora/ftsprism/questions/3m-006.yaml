@@ -19,8 +19,8 @@ intent: >
 
 answer: |
   3M's quick ratio at the end of the third quarter of 2022 was **0.97**
-  (precisely 0.9724): (total current assets − total inventories) / total
-  current liabilities = ($14,895M − $5,615M) / $9,543M = 0.9724.
+  (0.9724): (total current assets - total inventories) / total current
+  liabilities = ($14,895M - $5,615M) / $9,543M.
 
 formula: (total_current_assets - inventory) / total_current_liabilities
 

@@ -1,171 +1,190 @@
-"""Resolve + Plan: one LLM call doing what used to be two, now three.
+"""Resolve + Plan + Formula: EXPERIMENTAL single-call redesign.
 
-catalog.intent.clarify_intent() (which document(s)?) and
-retrieval.planner.plan_evidence() (what evidence, once there?) were always
-two separate PROMPTS answering two separate questions - but both read the
-SAME raw question as their primary input, and neither's own reasoning
-depended on the other's structured output. The only thing that crossed
-between them was `source_context`, a one-line string summarising the
-resolved document's type/period fed INTO the planner - and that dependency
-disappears entirely once resolution and planning happen in the same
-completion: the model already knows what it just resolved.
+Branch: experiment-single-llm-resolve-plan-formula. This replaces the
+previous three-part combined call (resolution + evidence planning +
+concept matching) with a leaner schema-driven prompt, and additionally
+folds formula proposal into the SAME call - eliminating
+calculation.py's separate CANDIDATE_SYSTEM_PROMPT call entirely for the
+ungoverned/derived_metric path.
 
-Concept matching (subject-matter recognition against the concepts
-collection) joins the same call for the same reason: the model is already
-reading the question, and the concepts collection is small and bounded -
-the same size class as the manifest, not something that scales with corpus
-size, so including it wholesale costs little. It stays a DISTINCT part of
-the prompt and a DISTINCT output field, same discipline as resolution vs.
-planning below - the model reports WHICH known concepts it recognized
-(exact ids from the supplied list), and the CODE deterministically looks up
-each one's own official_filing_terms/target_sections rather than trusting
-the model to reproduce them verbatim. A model asked to retype a curated
-phrase is a model that might retype it slightly wrong.
+Why: the previous prompt accumulated several "Observed live: <specific
+company, metric, and document>" anecdotes as bugs were root-caused
+against this project's own small gold corpus. The rules they illustrated
+were general, but stacking several real-corpus anecdotes in a PRODUCTION
+prompt reads like the system was patched until the eval passed, not
+designed to generalize - a fair concern to take seriously even though the
+underlying logic wasn't actually overfit. This rewrite states rules
+abstractly, with no corpus-specific examples anywhere.
 
-Three real, distinct instruction sets remain inside the ONE combined prompt
-below - resolution (manifest-driven, corpus-specific), evidence planning
-(deliberately domain-free, per planner.py's own design principle: it never
-names a document type, an industry, or a corpus), and concept matching
-(concepts-collection-driven). Combining the CALL does not combine the
-CONCERNS - a future domain with no catalog/manifest/concepts concept at all
-could still reuse the evidence-planning third verbatim; the standalone
-catalog.intent and retrieval.planner modules stay exactly as they were,
-independently callable and independently tested, for that reason.
+Formula proposal moving here loses nothing evidence-wise: the CURRENT
+propose_candidates() (calculation.py) already runs with zero retrieved
+evidence - {concept, question, preliminary_evidence_plan} only, same
+"general domain knowledge, no source text" position this call is already
+in. Combining them removes a whole LLM round-trip for every
+derived_metric question, not a capability.
 
-resolve_and_plan() is the live path pipeline.answer_question() now calls,
-folding in catalog.intent.resolve_documents()'s exact N1QL membership
-fetch (not an LLM call) after the combined completion returns.
+ITERATION HISTORY: several earlier drafts of this prompt were measured
+against the 3M gold set and rejected or revised based on what actually
+happened, not just design review:
+  - A draft that grouped several formula variables into one required_fact
+    (e.g. numerator and denominator as a single fact) broke
+    fact_binding, which only ever binds one value per fact id - the
+    second variable silently vanished, and every formula depending on
+    it went unbound. Reverted; one required_facts entry per printed
+    value (rule 7 below) is now explicit rather than left implicit.
+  - A draft that required formulas to reference variables by their own
+    identifiers (rule 9 below) fixed a real failure mode: the model
+    sometimes wrote plain-English formulas ("operating income (loss) /
+    net sales") that nothing downstream could match to bound facts.
+  - A draft with a single combined `content_anchor` STRING per fact
+    (wrapped as a one-element list) broke retrieval outright:
+    anchor_search.py matches each anchor as its own independent CONTAINS
+    substring, so combining several labels into one phrase demanded the
+    source contain that whole phrase verbatim, which real filing text
+    essentially never does - confirmed directly against main's own
+    (working) search terms on the same question. The CURRENT prompt
+    below asks for a single space-separated, deduplicated-by-stem
+    `content_anchor` again, but this time the code (see below) splits it
+    into individual words before it reaches anchor_search.py, rather
+    than passing the whole string as one anchor - a real precision
+    tradeoff (single-word anchors are looser than curated multi-word
+    labels) this prompt doesn't otherwise resolve, worth watching in
+    eval results rather than assuming settled.
+  - A draft with a detailed, multi-paragraph `content_anchor` rule full
+    of worked examples was flagged as itself gaming the eval the same
+    way the ORIGINAL production prompt's "Observed live: <company>"
+    anecdotes did - specific enough to fix one gold question's own
+    wording rather than stating a general principle. Replaced with the
+    terser, example-light rules below.
+  - The `doc_types`-guessing guard went through two different fixes:
+    first dropped to "leave doc_types empty when the question names no
+    form" (a strict no-guess rule), then changed again to "list every
+    form that could structurally carry this evidence" (rule 3 below) -
+    multi-candidate inclusion instead of either guessing one form or
+    guessing none, intended to handle documents docs/findings/
+    earnings-8k-not-catalogued-by-period.md describes (an earnings 8-K
+    and a 10-Q covering the same period) without excluding either.
+
+CONCEPTS is deliberately NOT part of this prompt at all - the morning's
+separate discussion (concepts collection as a search target, not
+something embedded in every prompt) applies here. This experiment stubs
+concept matching with a plain substring match against the concepts
+collection (see _match_concepts below) rather than the real FTS-search
+design discussed - a placeholder, not the intended final mechanism, kept
+only so a concept-naming question doesn't silently lose forced-phrase
+support during this experiment.
 """
 from .. import concepts as concepts_repo
 from .. import llm
 from ..catalog import manifest as catalog_manifest
 from ..catalog.intent import resolve_documents
 
-INTENT_AND_PLAN_SYSTEM_PROMPT = """\
-You do three things from one question: (1) identify which catalog \
-document(s) it needs, using ONLY catalog metadata; (2) plan what evidence \
-to look for inside them, using ONLY general knowledge of how such \
-documents are typically structured - you do not have the source text \
-itself; (3) recognize whether the question names any KNOWN subject-matter \
-concept from a small reference list.
+RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT = """\
+Extract routing and evidence-planning metadata as JSON from the QUESTION and MANIFEST.
 
-You are given a MANIFEST: {"companies": [...], "doc_types": [...], \
-"sectors": [...], "years_full": [...] (years with a complete annual \
-filing), "years_partial": [...] (partial-year coverage so far, usually the \
-current year), "quarters": {"<year>": [<quarter>, ...]} (which quarters \
-that year has their OWN quarterly filing)}.
+1. Output only valid JSON matching the schema. Never compute a value, derive a
+   result, or answer the question.
 
-You are also given CONCEPTS: [{"id", "user_term", "aliases"}, ...] - a \
-short list of subject matters this corpus is known to discuss, each named \
-the way a person might refer to it informally.
+2. `companies`, `doc_types`, `years` and `quarters` must be copied exactly from
+   MANIFEST. `[]` means any, not none.
 
-Return ONLY one JSON object:
+3. Set `doc_types` from what the QUESTION itself names. If it names no form,
+   list every form that could structurally carry this evidence - never only the
+   most likely one - but respect the period granularity the QUESTION itself
+   already states: a full-year question excludes interim forms that only ever
+   cover a quarter (e.g. a 10-Q, an interim earnings release), and a
+   specific-quarter question excludes annual-only forms. This is about the
+   period the question names, never a guess about which form a KIND of metric
+   typically appears in - that guess is what this rule forbids in the first
+   place.
+
+4. `years`: the year the question asks about. A filing's own comparative column
+   covers the prior year, so a comparison against the prior year does not add
+   that year. A proxy statement (DEF 14A) is dated the year AFTER the
+   compensation year it discloses - a question about a fiscal year's executive
+   compensation, incentive plan, or director pay resolves to that year's filing
+   date, one year later than the plan or compensation year it names.
+
+5. `subject_words`: key phrases copied verbatim from the QUESTION, naming its
+   subject matter. Empty when the question names no subject matter.
+
+6. `content_anchor`: labels you expect to find PRINTED in the document - row
+   captions, table headings, a metric as a filing writes it. Never the
+   question's own words with filler removed. Preserve printed qualifiers
+   ("net", "current", "diluted", "continuing operations"). Lowercase,
+   space-separated, deduplicated by stem. Omit a term rather than invent one.
+
+7. One `required_facts` entry per value or explanation the answer needs. A fact
+   is one value a source prints on one line; if naming it requires combining or
+   netting other values, list those components instead.
+
+8. `period_role`: omit for a single-period fact. Required whenever a formula
+   names the same quantity for two or more periods, so binding knows the
+   difference is deliberate.
+
+9. `formulas`: only when `answer_kind` is `derived_metric`, otherwise `[]`.
+   Reference required-fact ids exactly. Return more than one only for
+   materially distinct, independently defensible conventions - not rephrasings
+   of one method. Never rank them, never choose between them, never claim the
+   set is complete. Set `formula_preference` only when the QUESTION names a
+   convention.
+
+10. Use structural knowledge only - how documents are typically organised, how a
+    concept is usually labelled. Never a specific figure, date or named event
+    you recall about this entity, even where it is true.
+
+Schema:
 {
-  "companies": ["<exactly as in manifest>", ...],
-  "doc_types": ["<exactly as in manifest>", ...],
-  "years": [<int>, ...],
-  "quarters": [<int 1-4>, ...],
-  "reasoning": "<one sentence: why these companies/doc_types/years/quarters>",
-  "selection_complete": <true if the manifest's own coverage can answer this>,
-  "missing_evidence": ["<what's missing, if incomplete>"],
-  "concept": "<canonical name of the requested measure - lower-case, no entity/date/period>",
-  "answer_kind": "stated_fact | derived_metric | judgment | attribution",
+  "companies": [],
+  "doc_types": [],
+  "years": [],
+  "quarters": [],
+  "reasoning": "<one sentence>",
+  "selection_complete": true|false,
+  "missing_evidence": [],
+  "concept": "<canonical measure name only - no entity, date, or period>",
+  "answer_kind": "stated_fact|derived_metric|judgment|attribution",
   "required_facts": [
-    {"id": "<snake_case, the quantity only>", "description": "<what it represents>",
-     "content_anchors": ["<label expected verbatim in the source>"]}
+    {
+      "id": "<snake_case>",
+      "description": "<what fact is needed>",
+      "content_anchor": "<lowercase, space-separated, deduplicated-by-stem terms>",
+      "period_role": "<omit for a single-period fact; otherwise a short label>"
+    }
   ],
-  "preferred_artifacts": ["table" | "text" | "diagram" | "chart" | "log", ...],
+  "preferred_artifacts": ["table"|"text"|"diagram"|"chart"|"log"],
   "formula_preference": "<null, or the convention the question explicitly named>",
-  "subject_words": ["<the question's own wording for its subject matter, if any>"],
-  "matched_concepts": ["<id, exactly as in CONCEPTS - only ones genuinely named>"]
+  "formulas": [
+    {
+      "id": "<snake_case_id>",
+      "description": "<formula description>",
+      "formula": "<formula string>",
+      "rationale": "<why or when this method is defensible>"
+    }
+  ],
+  "subject_words": []
 }
 
-RESOLUTION (part 1):
-- IGNORE subject matter, topic, product, or event words entirely - the
-  catalog cannot filter on them. Do not let a name you recognize pull the
-  company or year off course.
-- A year range expands to every discrete year in it, not just the endpoints.
-- One year vs. the year right before it: prefer years = [the later year]
-  alone - a 10-K's own comparative column covers the prior year too. Use
-  multiple years only for a wider or non-adjacent span.
-- A named quarter MUST set quarters, checked against the manifest's own
-  map - a year can have several quarterly filings, and quarters is the only
-  way to say which one.
-- Use EXACT manifest values only - never invent or normalize one.
-- years_partial still counts as coverage, unless the question specifically
-  needs a COMPLETE annual filing.
-- Leave doc_types/years/quarters EMPTY when the question doesn't imply
-  one - empty means "any", not "none". A guess about which FORM TYPICALLY
-  CARRIES a kind of content is not the question implying one - it is you
-  inventing a constraint the question never stated, and the two documents
-  covering the identical quarter are not interchangeable, so guessing
-  wrong silently answers from the wrong one. Observed live: asked for
-  "Adjusted Free Cash Flow Conversion" (no document type named), this
-  narrowed doc_types to ["10-Q"] with the reasoning "non-GAAP quarterly
-  measures... are typically presented" there - a plausible-sounding guess
-  that was simply wrong; that metric's own formula is in the earnings
-  release 8-K's supplemental non-GAAP table, not the 10-Q. A metric's
-  NAME or NATURE (non-GAAP, "Adjusted X", a ratio, a segment breakdown...)
-  is never grounds to narrow doc_types by itself - only the question
-  itself naming a form ("in the 10-Q", "per the earnings release") does.
-- If no company plausibly matches, return companies empty, selection_complete
-  false, and say what's missing - never guess the closest name.
-- If no company plausibly matches, return companies empty, selection_complete
-  false, and say what's missing - never guess the closest name.
-
-EVIDENCE PLAN (part 2) - use STRUCTURAL knowledge only (typical section
-names, how a concept is usually labeled, what artifact usually carries it),
-NEVER a specific fact, figure, or named event you recall about this entity
-from training, even where it happens to be true. Propose a generic label
-instead unless the question itself names it - this matters MORE here than
-it would in isolation, because part 1 just told you which company this is.
-- concept: the single measure whose value determines the answer - canonical,
-  phrasing-independent, excludes subject, entity, date, period.
-- answer_kind: stated_fact (source states it directly) | derived_metric
-  (must combine/transform source values - use this even when an explanation
-  is ALSO requested alongside a calculation) | judgment (assess/classify an
-  already-known value) | attribution (explain a cause, the source states the
-  explanation itself, AND no calculation is also requested).
-- required_facts: only what's needed. EXCEPTION: when a metric has multiple
-  materially distinct established conventions, include the union of facts
-  every convention needs, not just the ones for one you'd pick - do not
-  rank or choose among them here.
-- Attribution/explanatory facts: name the driver GENERICALLY ("special
-  charges", "litigation-related charges") unless the question itself names
-  it - a specific recalled name is a guess, not a structural label.
-- A fact is ONE value the source prints on one line. If naming it requires
-  combining, netting, or excluding other values, list the printed
-  components instead, not the aggregate.
-- Fact IDs: snake_case, the quantity only - no entity, date, period, or
-  version.
-- content_anchors: labels reasonably expected verbatim in the source,
-  preserving printed qualifiers ("net", "current", "diluted", "continuing
-  operations") - never abstract, derived, or paraphrased. An empty list is
-  better than an invented label.
-- Never propose a formula, compute a value, or make the final judgment -
-  that happens downstream.
-- formula_preference: null UNLESS the question itself explicitly names a
-  specific convention to use ("use the alternate formula", "using the
-  preferred method") - copy the wording it used (e.g. "alternate",
-  "preferred"). Do not set it just because the concept happens to have more
-  than one convention; only the question asking for a specific one does.
-
-CONCEPT MATCHING (part 3):
-- subject_words: the question's own informal wording for its subject
-  matter (e.g. "forever chemicals", "earplug lawsuit") - empty if the
-  question names no subject matter at all (most questions won't).
-- matched_concepts: match subject_words against CONCEPTS' own user_term/
-  aliases - use EXACT ids from the supplied list, never invent one. Empty
-  if nothing in CONCEPTS plausibly matches, which is a normal outcome, not
-  a failure.
-- Do NOT match from background knowledge about what a concept usually
-  involves - only from the question's own wording against user_term/
-  aliases as given. A concept absent from the supplied list cannot match,
-  no matter how well you recognize the subject from training.
-
-Return strictly valid JSON - no markdown, no explanatory text outside the
-object.
+QUESTION: {question}
+MANIFEST: {manifest}
 """
+
+
+def _match_concepts(subject_words: list, concepts_data: dict) -> list:
+    """PLACEHOLDER for this experiment only - a plain substring match
+    against user_term/aliases, not the FTS-search-against-the-concepts-
+    collection design discussed separately. Keeps concept-naming
+    questions from silently losing forced-phrase support while this
+    branch is evaluated; not the intended final mechanism."""
+    words = " ".join(subject_words or []).lower()
+    if not words:
+        return []
+    matched = []
+    for entry in concepts_data.get("entries", []):
+        terms = [entry.get("user_term", "")] + (entry.get("aliases") or [])
+        if any(t and t.lower() in words for t in terms):
+            matched.append(entry)
+    return matched
 
 
 def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict = None,
@@ -176,41 +195,53 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
      "selected_documents": [{"doc_name", "reason"}, ...] (fts_resolver.py's
         shape, kept for the trace UI that already reads it),
      "selection_complete": bool, "missing_evidence": [...],
-     "plan": {...same shape retrieval.planner.plan_evidence() always
-        returned - concept/answer_kind/required_facts/preferred_artifacts -
-        so nothing downstream of this needs to change},
+     "plan": {...concept/answer_kind/required_facts/preferred_artifacts/
+        formula_preference, same shape retrieval.planner.plan_evidence()
+        always returned so nothing downstream needs to change},
+     "formulas": [...the model's own proposed formula candidates - NEW,
+        replaces calculation.propose_candidates() for this experiment...],
      "concepts": {"subject_words": [...], "matched": [...full concept
-        records, looked up by id - never trusted from the model's own
-        text...], "expanded_terms": [...], "target_sections": [...]}}.
-
-    `manifest`/`concepts_data`, if not given, are read fresh via
-    catalog.manifest.load(scope)/concepts.load(scope) - exposed as
-    parameters mainly so a caller that already has them (or a test) is not
-    forced into a second read.
+        records, looked up by id...], "expanded_terms": [...],
+        "target_sections": [...]}}.
     """
     manifest = manifest if manifest is not None else catalog_manifest.load(scope)
     concepts_data = (concepts_data if concepts_data is not None
                      else concepts_repo.load(scope=scope))
-    # Only what matching needs, not official_filing_terms/target_sections -
-    # those are looked up deterministically below once the model says which
-    # ids matched, never generated by the model itself.
-    concepts_for_prompt = [{"id": c.get("id"), "user_term": c.get("user_term"),
-                            "aliases": c.get("aliases") or []}
-                           for c in concepts_data.get("entries", [])]
-    user = (f"QUESTION: {question}\n\nMANIFEST:\n{manifest}\n\n"
-           f"CONCEPTS:\n{concepts_for_prompt}")
-    result = llm.chat_json(INTENT_AND_PLAN_SYSTEM_PROMPT, user, model=model,
+    user = (f"QUESTION: {question}\n\nMANIFEST:\n{manifest}")
+    result = llm.chat_json(RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT, user, model=model,
                            stage="resolve_and_plan")
 
     intent = {k: result.get(k) for k in
              ("companies", "doc_types", "years", "quarters", "reasoning",
               "selection_complete", "missing_evidence")}
-    plan = {k: result.get(k) for k in
-           ("concept", "answer_kind", "required_facts", "preferred_artifacts",
-            "formula_preference")}
+    # required_facts arrives with the SINGULAR content_anchor this iteration's
+    # prompt asks for - "lowercase, space-separated, deduplicated by stem" -
+    # a bag-of-words description, not a verbatim phrase. anchor_search.py
+    # matches each element of content_anchors as its own independent CONTAINS
+    # substring (a chunk matches if it contains ANY one), so this is split on
+    # whitespace into that list here - each individual TERM becomes its own
+    # anchor, rather than wrapped whole as one long phrase (that was the
+    # earlier, measured-broken iteration: a chunk then had to contain the
+    # entire multi-word string verbatim, which real filing text essentially
+    # never does). This word-level split is looser than a curated list of
+    # precise multi-word labels ("operating income (loss)" becomes three
+    # separate single-word anchors here, not one phrase) - a real tradeoff
+    # against precision this prompt doesn't otherwise address, worth
+    # confirming empirically rather than assuming either way.
+    required_facts = []
+    for f in result.get("required_facts") or []:
+        if isinstance(f, dict):
+            f = dict(f)
+            anchor = f.pop("content_anchor", None)
+            f["content_anchors"] = list(dict.fromkeys((anchor or "").split()))
+        required_facts.append(f)
+    plan = {"concept": result.get("concept"), "answer_kind": result.get("answer_kind"),
+           "required_facts": required_facts,
+           "preferred_artifacts": result.get("preferred_artifacts"),
+           "formula_preference": result.get("formula_preference")}
+    formulas = result.get("formulas") or []
 
-    by_id = {c.get("id"): c for c in concepts_data.get("entries", [])}
-    matched = [by_id[i] for i in (result.get("matched_concepts") or []) if i in by_id]
+    matched = _match_concepts(result.get("subject_words") or [], concepts_data)
     expanded_terms, target_sections = [], []
     for c in matched:
         for term in (c.get("official_filing_terms") or []) + (c.get("aliases") or []):
@@ -233,6 +264,7 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
         "selection_complete": intent.get("selection_complete", False),
         "missing_evidence": intent.get("missing_evidence") or [],
         "plan": plan,
+        "formulas": formulas,
         "concepts": {
             "subject_words": result.get("subject_words") or [],
             "matched": matched,

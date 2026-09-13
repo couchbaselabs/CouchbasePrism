@@ -24,10 +24,8 @@ answer: |
   computed as Adjusted Free Cash Flow divided by Adjusted Net Income
   Attributable to 3M.
 
-  For the three months ended June 30, 2023: Adjusted free cash flow was
-  $1,463 million and Adjusted net income attributable to 3M was $1,204
-  million ($1,463M / $1,204M = 121.5%, rounding to the 122% the release
-  itself prints).
+  Three months ended June 30, 2023: adjusted free cash flow $1,463 million;
+  adjusted net income attributable to 3M $1,204 million.
 
 formula: (adjusted_free_cash_flow / adjusted_net_income_attributable_to_3m) * 100
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from .. import catalog, config, dictionary, retrieval
 from .answer import synthesize
-from .calculation import candidate_facts, compute, propose_candidates
+from .calculation import candidate_facts, compute, propose_candidates, validate_candidate
 from .fact_binding import bind_facts, grounded_facts, to_identifier, validate_bindings
 from .resolve_and_plan import resolve_and_plan
 from .validation import validate_conclusion
@@ -157,12 +157,36 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
                 needed = set(entry["required_facts"])
                 fact_specs = {fid: {"id": fid} for fid in needed}
             else:
-                # Propose FIRST, then bind the union of what the plan asked for
-                # and what the candidates reference. The planner under-specifies:
-                # it omitted `inventory` for quick ratio, leaving the only
-                # correct formula with an unbound name and nothing computable.
-                candidates, rejected = propose_candidates(
-                    plan.get("concept", ""), question, plan, model=model)
+                # EXPERIMENTAL (branch experiment-single-llm-resolve-plan-
+                # formula): resolve_and_plan() now proposes formulas itself,
+                # in the SAME call as resolution/planning - no second
+                # propose_candidates() round-trip. Bridge its {id,
+                # description, formula, rationale} shape into what
+                # validate_candidate()/compute() already expect
+                # (candidate_id/method_name/required_facts), rather than
+                # touching calculation.py at all - keeps this experiment's
+                # blast radius to resolve_and_plan.py + this call site only.
+                # required_facts is the SHARED plan-level list (this
+                # schema has no per-formula fact list, unlike the old
+                # per-candidate one) - every formula gets the same set,
+                # matching the schema's own union-of-conventions rule.
+                if resolution_detail is not None:
+                    required = plan.get("required_facts") or []
+                    candidates, rejected = [], []
+                    for f in resolution_detail.get("formulas") or []:
+                        candidate = {"candidate_id": f.get("id"), "method_name": f.get("id"),
+                                    "formula": f.get("formula"), "rationale": f.get("rationale"),
+                                    "required_facts": required}
+                        problem = validate_candidate(candidate)
+                        (rejected if problem else candidates).append(
+                            {**candidate, "rejected_because": problem} if problem else candidate)
+                else:
+                    # catalog_filter=False (the unscoped baseline eval phase)
+                    # never calls resolve_and_plan() at all, so there is no
+                    # formulas field to bridge from - fall back to the old
+                    # standalone call so that phase keeps working unchanged.
+                    candidates, rejected = propose_candidates(
+                        plan.get("concept", ""), question, plan, model=model)
                 # candidate_facts() carries each fact's own metadata (anchors,
                 # period_role) rather than collapsing everything to bare ids -
                 # a formula needing the same quantity from two years names two

@@ -20,19 +20,12 @@ intent: >
   failure than a wrong number would be.
 
 answer: |
-  3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%** -
-  an operating loss of $(9,128) million on net sales of $32,681 million. The
-  filing prints this margin directly rather than leaving it to be derived.
+  3M's full-year 2023 GAAP operating income (loss) margin was **-27.9%**:
+  an operating loss of $(9,128) million on net sales of $32,681 million.
 
   The primary driver was net costs for significant litigation, which
-  accounted for **$14,869 million** of special-item charges *at the operating
-  income line*. The same item is $15,245 million at the income-before-taxes
-  line - the "approximately $15.2 billion pre-tax" the MD&A Overview cites -
-  with the $376 million difference being imputed interest and other
-  components below the operating line, which do not affect operating margin.
-  That $15.2 billion comprises the PWS Settlement ($10.5 billion) and the
-  Combat Arms Earplugs Settlement ($4.3 billion, inclusive of imputed
-  interest). Excluding all special items, adjusted operating margin was 20.3%.
+  accounted for **$14,869 million** of special-item charges at the operating
+  income line.
 
 formula: (operating_income_loss / net_sales) * 100
 
