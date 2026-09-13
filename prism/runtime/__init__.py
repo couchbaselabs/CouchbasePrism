@@ -26,6 +26,6 @@ from .fact_binding import (  # noqa: F401
 )
 from .pipeline import PipelineOptions, answer_question  # noqa: F401
 from .resolve_and_plan import (  # noqa: F401
-    INTENT_AND_PLAN_SYSTEM_PROMPT, resolve_and_plan,
+    RESOLVE_PLAN_FORMULA_SYSTEM_PROMPT, resolve_and_plan,
 )
 from .validation import validate_conclusion  # noqa: F401
