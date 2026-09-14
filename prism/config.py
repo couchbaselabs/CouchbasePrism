@@ -326,13 +326,21 @@ KNN_CANDIDATES = 200
 #               reports each channel's rank and contribution per chunk.
 # Measured over 143 questions against an annotated evidence-page benchmark:
 # sum, native-rrf, native-rsf and our in-code rrf are indistinguishable on
-# recall (0.58-0.60 resolved, 0.81-0.85 with the document forced). Fusion
-# strategy is not a quality lever on this corpus. native-rrf is the default
-# because it ties for best recall while being ~30% faster than the in-code
-# version - one statement, no application-side merge - and `explain` still
-# exposes the per-channel breakdown. native-dbsf is measurably WORSE (0.44) and
-# is kept only as the counter-example.
-HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "native-rrf")
+# AGGREGATE recall (0.58-0.60 resolved, 0.81-0.85 with the document forced).
+# That aggregate number hid a real single-question difference, though:
+# 3m-007 (a phrase-precision question - two rare identifying tokens on one
+# page of 167) passed under native-rsf and our in-code rrf, but FAILED under
+# native-rrf and additive/"score" - same rank_constant (60) in both RRF
+# variants, so the difference traces to candidate-pool width, not the
+# fusion math: in-code rrf caps each of its two legs at LEG_CANDIDATES (20)
+# before merging, native fusion considers up to NATIVE_WINDOW_SIZE (150)
+# internally before Couchbase's own (opaque to us) fusion runs - RRF ranks
+# by POSITION, not raw score, so a wider candidate pool can push a correct
+# but not-top-of-leg chunk down in rank even with identical relevance.
+# native-rsf is the default now on the strength of that one measured case,
+# not the aggregate tie - native-dbsf is measurably WORSE (0.44) and is kept
+# only as the counter-example.
+HYBRID_FUSION = os.environ.get("PRISM_HYBRID_FUSION", "native-rsf")
 # Only rrf and rsf are documented (Bleve v2.5.4 onwards). "dbsf" appears in the
 # internal design document marked [TBD] and is absent from the released docs -
 # the server accepts the value without implementing it, the same validation gap

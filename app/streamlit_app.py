@@ -136,22 +136,28 @@ PHASE_HELP = {
     "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
                 "with binding, deterministic calculation and governance",
 }
-FUSION_LABELS = {"score": "Additive (default)", "native-rrf": "Native RRF",
-                 "native-rsf": "Native RSF", "rrf": "RRF in code"}
+FUSION_LABELS = {"score": "Additive", "native-rrf": "Native RRF",
+                 "native-rsf": "Native RSF (default)", "rrf": "RRF in code"}
 FUSION_HELP = {
     "score": "Bleve's default: weighted addition of the lexical and vector scores. "
              "Sensitive to the two scores being on different scales, so a "
-             "lexical-only hit can lose to every vector hit - but measured equal to "
-             "RRF and RSF on recall over 143 questions.",
+             "lexical-only hit can lose to every vector hit - measured equal to RRF "
+             "and RSF on recall over 143 questions, but FAILED a real single-question "
+             "phrase-precision case (3m-007) that RSF and in-code RRF both passed.",
     "native-rrf": "Server-side reciprocal rank fusion, 1/(k + rank), one SEARCH(). "
                   "Needs Couchbase 8.1 - on 8.0.1 the score field parsed and was "
-                  "silently ignored. Channel weights come from each query's boost.",
+                  "silently ignored. Channel weights come from each query's boost. "
+                  "Also FAILED 3m-007 despite an identical rank_constant to in-code "
+                  "RRF - traced to a much wider internal candidate window (150 vs "
+                  "in-code's 20 per leg) pushing a correct chunk down in rank.",
     "native-rsf": "Relative score fusion: min-max normalise each channel into "
                   "[0,1], then add with the query boosts as weights. Keeps score "
-                  "magnitude, but one outlier skews the normalisation.",
+                  "magnitude, but one outlier skews the normalisation. Default as of "
+                  "this measured case - passed 3m-007 where additive and native-rrf "
+                  "both failed.",
     "rrf": "Two SEARCH channels unioned in one statement, fused in application "
            "code. Works on any version, and the only option that reports each "
-           "channel's rank and contribution per chunk.",
+           "channel's rank and contribution per chunk. Passed 3m-007.",
 }
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
@@ -1312,7 +1318,7 @@ with st.sidebar:
 
     if phases.get(phase).bm25:
         fusion = st.segmented_control(
-            "Hybrid fusion", list(FUSION_LABELS), default="score", required=True,
+            "Hybrid fusion", list(FUSION_LABELS), default="native-rsf", required=True,
             width="stretch", format_func=lambda f: FUSION_LABELS[f])
         st.caption(FUSION_HELP[fusion])
         tuning = tuning_panel(fusion)
