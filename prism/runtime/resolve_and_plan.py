@@ -130,10 +130,15 @@ Extract routing and evidence-planning metadata as JSON from the QUESTION and MAN
    difference is deliberate.
 
 9. `formulas`: only when `answer_kind` is `derived_metric`, otherwise `[]`.
-   Reference required-fact ids exactly. Return more than one only for
-   materially distinct, independently defensible conventions - not rephrasings
-   of one method. Never rank them, never choose between them, never claim the
-   set is complete. Set `formula_preference` only when the QUESTION names a
+   Reference required-fact ids exactly. `formula` is the bare expression only
+   - never prefixed with a variable name and `=` (write
+   `adjusted_free_cash_flow / adjusted_income`, not
+   `adjusted_free_cash_flow_conversion = adjusted_free_cash_flow /
+   adjusted_income`) - the evaluator parses a single expression, not an
+   assignment statement. Return more than one only for materially distinct,
+   independently defensible conventions - not rephrasings of one method.
+   Never rank them, never choose between them, never claim the set is
+   complete. Set `formula_preference` only when the QUESTION names a
    convention.
 
 10. Use structural knowledge only - how documents are typically organised, how a
@@ -165,7 +170,7 @@ Schema:
     {
       "id": "<snake_case_id>",
       "description": "<formula description>",
-      "formula": "<formula string>",
+      "formula": "<bare expression only, no leading `name =`>",
       "rationale": "<why or when this method is defensible>"
     }
   ],

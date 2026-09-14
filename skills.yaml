@@ -13,3 +13,11 @@ secfilings:
     year it discloses - a question about a fiscal year's executive
     compensation, incentive plan, or director pay resolves to a filing
     dated one year later than the plan year it names.
+  - A 10-K/10-Q's own MD&A non-GAAP cash-flow disclosure (e.g. "Free Cash
+    Flow (non-GAAP measure)") is typically defined against UNADJUSTED GAAP
+    net income and presented cumulatively (year-to-date), not per quarter -
+    a different construct from an "Adjusted" variant of the same-sounding
+    metric for one specific quarter, which a company's earnings-release 8-K
+    reports instead. When the QUESTION names the "Adjusted" variant for a
+    specific quarter, narrow doc_types to the earnings release alone rather
+    than listing the 10-K/10-Q as an equally likely candidate.
