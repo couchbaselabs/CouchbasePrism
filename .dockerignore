@@ -5,9 +5,6 @@ config.yaml
 *.pem
 *.key
 
-# Runtime/environment state, not source - same reasoning as .gitignore.
-dictionary.yaml
-
 # Never send this into a build context - large third-party dataset with no
 # redistribution license, and irrelevant to the packaged app either way.
 financebench/
