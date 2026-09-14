@@ -1,0 +1,45 @@
+number: 12
+title: Dividend Continuity
+
+category: single-doc-extraction
+
+doc_names:
+  - 3M_2022_10K
+
+question: >
+  In its 2022 annual report, what did 3M state about the continuity of its
+  dividend, and what was the most recently declared quarterly amount?
+
+intent: >
+  The filing makes its own qualitative claim - "the 65th consecutive year of
+  dividend increases" - so the answer is a cited fact, not a judgment the
+  system has to form. The failure this catches is a system that ignores the
+  stated characterization and instead assembles its own stability verdict
+  from dividend figures across periods, which is an unapproved judgment
+  dressed as an extraction. Report what the source says; do not re-derive it.
+
+answer: |
+  3M stated that its February 2023 declaration of a first-quarter 2023
+  dividend of **$1.50 per share**, an increase of 1 percent, marked the
+  **65th consecutive year of dividend increases**.
+
+formula: null
+
+evidence:
+  - "3M_2022_10K: Page 48 · Financial Condition and Liquidity - Dividends · text"
+
+verified: true
+
+notes: >
+  Verbatim from page 48: "In February 2023, 3M's Board of Directors declared
+  a first-quarter 2023 dividend of $1.50 per share, an increase of 1 percent.
+  This marked the 65th consecutive year of dividend increases for 3M."
+
+  The same sentence also appears in 3M_2023_Q2_10Q (page 122), so a run that
+  resolves the 10-Q instead is not wrong on the facts - but the question
+  names the annual report, so the 10-K is the cited source.
+
+  Distinct from every other question in the corpus: the source supplies the
+  qualitative characterization itself. answer.py's synthesis prompt carves
+  out exactly this case - a stated characterization is a grounded fact, not
+  an invented threshold - and nothing tested it until now.

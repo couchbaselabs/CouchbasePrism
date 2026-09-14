@@ -1,0 +1,58 @@
+number: 9
+title: Raw Material Impact on Segment Margins
+
+category: single-doc-extraction
+
+doc_names:
+  - 3M_2022_10K
+
+question: >
+  In the MD&A of its 2022 annual report, how did 3M quantify the impact of
+  raw material inflation and supply chain disruptions on Safety and
+  Industrial segment margins?
+
+intent: >
+  It didn't - and the paragraph that says so contains two quantified figures
+  belonging to entirely different drivers: a $1.2 billion litigation charge
+  and a 4.5 percentage-point drag from falling respirator sales. A system
+  that answers "how much" by reaching for the nearest number in the right
+  paragraph reports one of those as the raw-material impact, with a correct
+  citation. The question is leading on purpose: it presumes a quantification
+  that does not exist, and the only right answer is to say so.
+
+answer: |
+  3M did not quantify it. The Safety and Industrial discussion names the
+  drivers without attaching a figure: margins "were also impacted by
+  increased raw materials and logistics costs, manufacturing productivity
+  headwinds, partially offset by selling price actions, spending discipline
+  and restructuring actions."
+
+  The two quantified figures in that same discussion belong to other
+  drivers - a 2022 second-quarter pre-tax charge of approximately
+  $1.2 billion for Combat Arms Earplugs litigation, and a 4.5 percentage-point
+  reduction in organic growth from declining disposable respirator sales.
+
+formula: null
+
+evidence:
+  - "3M_2022_10K: Page 55 · Safety and Industrial Business Segment - Year 2022 results · text"
+
+verified: true
+
+notes: >
+  Verified against the PDF. Page 55 reads: "Business segment operating income
+  margins decreased year-on-year due to special item costs for significant
+  litigation primarily related to steps toward resolving Combat Arms Earplugs
+  litigation (discussed in Note 16) resulting in a 2022 second quarter
+  pre-tax charge of approximately $1.2 billion. Margins were also impacted by
+  increased raw materials and logistics costs, manufacturing productivity
+  headwinds, partially offset by selling price actions, spending discipline
+  and restructuring actions."
+
+  Corroborating measurement: "basis points" appears on ZERO pages of the
+  entire 2022 10-K, so no basis-point quantification of any margin driver
+  exists anywhere in the document.
+
+  This is the corpus's only question whose correct answer is a refusal. It
+  tests the one failure a cited system cannot otherwise expose: a number that
+  is real, adjacent, correctly quoted, and answers a different question.
