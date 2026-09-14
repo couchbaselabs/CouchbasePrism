@@ -58,6 +58,11 @@ computing and only binds facts and writes prose. That switch is what makes
 Docker is the only prerequisite for running PRISM - the image bundles Python
 and every dependency, nothing else to install on the host.
 
+New to Capella/AI Data Plane/S3, or setting up from a blank project? See
+[`docs/setup-guide.md`](docs/setup-guide.md) for the full walkthrough -
+cluster/bucket/collection setup, S3 staging, and every AI Data Plane
+Workflow field - before filling in `config.yaml` below.
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/couchbaselabs/CouchbasePrism/main/config.example.yaml -o config.yaml
 $EDITOR config.yaml   # fill in Capella, AI Data Plane, AWS, OpenAI, domains
@@ -69,6 +74,13 @@ curl -sSL https://raw.githubusercontent.com/couchbaselabs/CouchbasePrism/main/in
 `config.yaml` is mounted into the container at runtime, never baked into the
 image - the image is on a public registry, and it should never carry your
 secrets. Re-run the same `install.sh` line to pull a newer version.
+
+Once the app is up and your Couchbase AI Data Plane Workflow has finished
+ingesting (see [`docs/setup-guide.md`](docs/setup-guide.md) if you haven't
+set that up yet), run **Initialize** - the Setup tab's own button, or
+`manage.py initialize`. It rebuilds the search indexes and catalog from the
+ingested corpus and seeds the dictionary and concepts collections - the one
+remaining step, fully automatic, safe to re-run.
 
 For development, run from a checkout instead:
 
