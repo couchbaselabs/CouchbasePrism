@@ -183,7 +183,9 @@ def initialize(args):
         ok = sum(1 for r in result["catalog_results"] if r["ok"])
         print(f"\n[{scope}] catalog: {ok}/{len(result['catalog_results'])} document(s)",
               file=sys.stderr)
-        print(f"[{scope}] dictionary: cleared {len(result['dictionary_removed'])} entrie(s)",
+        print(f"[{scope}] dictionary: seeded {len(result['dictionary_seeded'])} entrie(s)",
+              file=sys.stderr)
+        print(f"[{scope}] concepts: seeded {len(result['concepts_seeded'])} entrie(s)",
               file=sys.stderr)
     print("done", file=sys.stderr)
 

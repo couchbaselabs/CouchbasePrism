@@ -33,11 +33,16 @@ COPY eval/ ./eval/
 COPY design/ ./design/
 COPY docs/ ./docs/
 COPY tests/ ./tests/
-# skills.yaml (unlike config.yaml) holds no secrets - a seeded default ships
-# in the image so every deployment method works, not only docker-compose's
-# read-write bind mount (docker-compose.yml); that mount is what lets edits
-# made through the Skills tab persist past a container restart.
-COPY manage.py VERSION README.md LICENSE config.example.yaml skills.yaml ./
+# skills.yaml, dictionary.yaml, and concepts.yaml (unlike config.yaml) hold
+# no secrets - seeded defaults ship in the image so every deployment method
+# works, not only docker-compose's read-write bind mounts. dictionary.yaml
+# and concepts.yaml are read once, at Initialize time (prism/initialize.py
+# seeds Couchbase from them) - the running app never touches these files
+# again afterward, unlike skills.yaml, which resolve_and_plan reads on
+# every call and the Skills tab edits live, hence its own read-write mount
+# in docker-compose.yml.
+COPY manage.py VERSION README.md LICENSE config.example.yaml skills.yaml \
+    dictionary.yaml concepts.yaml ./
 COPY .streamlit/ ./.streamlit/
 
 # Runs as a non-root user - this is a POC/demo/learning tool, not a product

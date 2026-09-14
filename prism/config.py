@@ -282,8 +282,18 @@ EMBED_MODEL = os.environ.get("MODEL_ID", "")
 # --- Dictionary ------------------------------------------------------------
 # Customer/environment state, not source. Lives outside the package so it can
 # differ per deployment; eventually belongs in {bucket}.{scope}.dictionary.
+# Seeded into Couchbase by Initialize (prism/initialize.py) for
+# config.DEFAULT_SCOPE only - a flat, unscoped file, matching the single-
+# domain demo this corpus actually is; a second domain with real content
+# would need its own seed file, not this one reused.
 DICTIONARY_PATH = pathlib.Path(
     os.environ.get("PRISM_DICTIONARY", REPO_ROOT / "dictionary.yaml"))
+
+# --- Concepts ----------------------------------------------------------
+# Same reasoning as DICTIONARY_PATH above - a flat local seed file,
+# migrated into Couchbase by Initialize for config.DEFAULT_SCOPE only.
+CONCEPTS_PATH = pathlib.Path(
+    os.environ.get("PRISM_CONCEPTS", REPO_ROOT / "concepts.yaml"))
 
 # --- Skills ------------------------------------------------------------
 # Domain-expert-owned filing-mechanics knowledge (a proxy statement's filing

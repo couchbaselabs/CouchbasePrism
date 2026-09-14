@@ -1281,7 +1281,15 @@ with st.sidebar:
         st.image(PRISM_MARK, width=68)
         with st.container(gap=None):
             st.markdown(f"### Couchbase Prism `v{config.VERSION}`")
-            st.caption("Governed retrieval that works immediately—and learns from reviewed use")
+            st.caption("A Couchbase reference architecture for governed document intelligence")
+    # A plain link - renders in the viewer's own browser tab regardless of
+    # where the server runs (Docker or bare metal); Streamlit's UI is
+    # rendered client-side, so this is no different from any other outbound
+    # link on any other page. st.link_button (not st.markdown) so it always
+    # opens as a real new tab rather than depending on markdown link
+    # rendering to carry target="_blank".
+    st.link_button("View on GitHub", "https://github.com/couchbaselabs/CouchbasePrism",
+                   icon=":material/code:", width="stretch")
 
     st.space("small")
     st.markdown("### Run configuration")
@@ -1490,7 +1498,8 @@ with tab_setup:
                 # always has.
                 per_domain = summary["domains"]
                 catalog_results = [r for d in per_domain.values() for r in d["catalog_results"]]
-                dictionary_removed = [e for d in per_domain.values() for e in d["dictionary_removed"]]
+                dictionary_seeded = [e for d in per_domain.values() for e in d["dictionary_seeded"]]
+                concepts_seeded = [e for d in per_domain.values() for e in d["concepts_seeded"]]
                 ok = sum(1 for r in catalog_results if r["ok"])
                 failed = [r for r in catalog_results if not r["ok"]]
                 breakdown = ", ".join(
@@ -1498,8 +1507,9 @@ with tab_setup:
                     f"{len(d['catalog_results'])}" for scope, d in per_domain.items())
                 status.update(
                     label=f"Initialized — catalog {ok}/{len(catalog_results)} ({breakdown}), "
-                          f"dictionary cleared ({len(dictionary_removed)} "
-                          "entrie(s)), search index rebuilt",
+                          f"dictionary seeded ({len(dictionary_seeded)} entrie(s)), "
+                          f"concepts seeded ({len(concepts_seeded)} entrie(s)), "
+                          "search index rebuilt",
                     state="complete", expanded=False)
             # st.toast survives the st.rerun() below; st.success/st.error here
             # would not - same reasoning as the earlier catalog-only button.

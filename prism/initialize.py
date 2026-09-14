@@ -1,7 +1,7 @@
 """Initialize: the one operator action a user runs after the Couchbase AI Data
 Plane workflow finishes ingesting - no manual index setup required.
 
-Runs the same thirteen steps ONCE PER CONFIGURED DOMAIN (config.yaml) - one
+Runs the same fourteen steps ONCE PER CONFIGURED DOMAIN (config.yaml) - one
 domain, one scope, each with its own docs/catalog search indexes. A domain
 with nothing ingested yet (iso20020, for now - architecture only, no real
 content) is not an error: its catalog rebuild step returns an empty result and
@@ -11,9 +11,19 @@ point of building the domain-scoping layout for real now is that a second
 domain provisions and behaves correctly with zero content in it, the same way
 the concepts collection does.
 
-Destructive by design, per domain - drops and rebuilds that domain's catalog,
-dictionary, and search indexes from scratch - but never touches `docs` or
-anything the ingestion workflow itself owns, in any domain.
+Destructive by design, per domain - drops and rebuilds that domain's catalog
+and search indexes from scratch - but never touches `docs` or anything the
+ingestion workflow itself owns, in any domain.
+
+Dictionary and concepts are SEEDED, not merely cleared - a demo should not
+require live editing to reach a working state (a single-click batch run
+after Initialize must already have a governed metric and known concepts to
+show, not an empty collection waiting for someone to populate it during the
+recording). Seeded from the local files dictionary.yaml/concepts.yaml, and
+ONLY for config.DEFAULT_SCOPE: those files are flat, unscoped, and belong to
+this reference corpus specifically - seeding them into a domain with no real
+content (iso20020) would plant one domain's demo data in another's empty
+placeholder, which is worse than leaving it empty.
 
 Ordering is deliberate, not incidental, and reverses an earlier version of
 this module's own reasoning. The catalog rebuild reads cover-page text via
@@ -41,7 +51,7 @@ reindexing yet.
 """
 import json
 
-from . import catalog, config, couchbase_io, dictionary
+from . import catalog, concepts, config, couchbase_io, dictionary
 
 STEPS = [
     "Drop the search index",
@@ -56,7 +66,8 @@ STEPS = [
     "Drop the catalog search index",
     "Recreate the catalog search index",
     "Wait for the catalog search index to catch up",
-    "Clear the dictionary",
+    "Seed the dictionary from dictionary.yaml",
+    "Seed concepts from concepts.yaml",
 ]
 
 FTS_INDEX_DEFINITION_PATH = config.REPO_ROOT / "design" / "fts-index.json"
@@ -100,8 +111,10 @@ def run(model: str = None, sectors: dict = None, on_step=None,
     couchbase_io.wait_for_search_index for BOTH reindex-catch-up steps.
 
     Returns {"domains": {domain: {"steps": [...], "catalog_results": [...],
-    "manifest": {...}, "dictionary_removed": [...]}}} - one entry per domain
-    attempted, in the same order `domains` was given.
+    "manifest": {...}, "dictionary_seeded": [...], "concepts_seeded": [...]}}}
+    - one entry per domain attempted, in the same order `domains` was given.
+    Seeded lists are empty for any domain other than config.DEFAULT_SCOPE -
+    see the module docstring for why that's deliberate, not a gap.
     """
     if not FTS_INDEX_DEFINITION_PATH.exists():
         raise FileNotFoundError(
@@ -176,7 +189,28 @@ def run(model: str = None, sectors: dict = None, on_step=None,
             step(10, lambda: couchbase_io.create_search_index(
                 catalog_index_definition, scope=scope, index_name=catalog_index_name))
             step(11, wait_for_catalog_index)
-            summary["dictionary_removed"] = step(12, lambda: dictionary.clear(scope=scope))
+
+            def seed_dictionary(_scope=scope):
+                # Only this reference corpus's own domain gets seeded - a
+                # domain with no real content (iso20020) stays genuinely
+                # empty, same as before, rather than silently inheriting
+                # 3M-specific entries it has no basis to have.
+                if _scope != config.DEFAULT_SCOPE:
+                    dictionary.clear(scope=_scope)
+                    return []
+                file_data = dictionary.load(path=config.DICTIONARY_PATH)
+                dictionary.save(file_data, scope=_scope)
+                return [e.get("id") for e in file_data.get("entries", [])]
+
+            def seed_concepts(_scope=scope):
+                if _scope != config.DEFAULT_SCOPE:
+                    return []
+                file_data = concepts.load(path=config.CONCEPTS_PATH)
+                concepts.save(file_data, scope=_scope)
+                return [e.get("id") for e in file_data.get("entries", [])]
+
+            summary["dictionary_seeded"] = step(12, seed_dictionary)
+            summary["concepts_seeded"] = step(13, seed_concepts)
         except Exception:
             # This domain's remaining steps are skipped (a later one assumes
             # an earlier one in the SAME domain succeeded), but the next

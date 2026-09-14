@@ -1,0 +1,18 @@
+entries:
+- id: 490abd7e-fb41-4821-aa41-6ce848b6f824
+  metric: Quick Ratio
+  formula_type: Preferred
+  user_friendly_formula: (Current Assets - Inventories) / Current Liabilities
+  formula: (current_assets-inventories)/current_liabilities
+  required_facts:
+  - current_assets
+  - current_liabilities
+  - inventories
+  bm25_table_anchors:
+    target_strings:
+    - Total current assets
+    - Inventories
+    - Total current liabilities
+  abbreviation: Acid-Test
+  threshold_operator: '>='
+  threshold_number: 1.0
