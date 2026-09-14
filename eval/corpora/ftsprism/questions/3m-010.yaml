@@ -1,0 +1,55 @@
+number: 10
+title: Free Cash Flow Conversion FY2022
+
+category: single-doc-computed
+
+doc_names:
+  - 3M_2022_10K
+
+question: >
+  How does 3M define free cash flow conversion in its 2022 annual report, and
+  what were the inputs and the resulting figure for 2022 and 2021?
+
+intent: >
+  The deliberate twin of 3m-003. This is the UNADJUSTED, full-year measure a
+  10-K prints; 3m-003 is the "Adjusted" quarterly one an earnings release
+  prints. Measured: "adjusted free cash flow" appears zero times in this
+  10-K. Same-sounding metric, different document, different construct - and
+  answering either question with the other's figures yields a real,
+  confidently wrong number. Run the two side by side and the distinction
+  shows itself rather than having to be asserted.
+
+answer: |
+  3M defines free cash flow as net cash provided by operating activities less
+  purchases of property, plant and equipment, and **free cash flow conversion
+  as free cash flow divided by net income (loss) attributable to 3M**.
+
+  | (Millions) | 2022 | 2021 |
+  |---|---:|---:|
+  | Net cash provided by operating activities | $5,591 | $7,454 |
+  | Purchases of property, plant and equipment | (1,749) | (1,603) |
+  | Free cash flow | 3,842 | 5,851 |
+  | Net income attributable to 3M | $5,777 | $5,921 |
+  | **Free cash flow conversion** | **66%** | **99%** |
+
+formula: (free_cash_flow / net_income_attributable_to_3m) * 100
+
+evidence:
+  - "3M_2022_10K: Page 77 · Free Cash Flow (non-GAAP measure) · table"
+
+verified: true
+
+notes: >
+  Verified against the PDF. Page 77 prints, for years ended December 31:
+  net cash provided by operating activities $5,591 / $7,454; purchases of
+  PP&E $(1,749) / $(1,603); free cash flow 3,842 / 5,851; net income
+  attributable to 3M $5,777 / $5,921; free cash flow conversion 66% / 99%.
+
+  3,842 / 5,777 = 66.5% and 5,851 / 5,921 = 98.8%, matching the printed 66%
+  and 99%.
+
+  The denominator is NET INCOME ATTRIBUTABLE TO 3M, not adjusted net income -
+  that difference is the whole distinction from 3m-003, whose denominator is
+  adjusted net income attributable to 3M. The 10-K's own definition (page 77):
+  "The Company defines free cash flow conversion as free cash flow divided by
+  net income (loss) attributable to 3M."

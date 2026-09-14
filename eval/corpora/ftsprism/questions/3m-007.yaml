@@ -1,0 +1,57 @@
+number: 7
+title: Auditor Tenure and Report Date
+
+category: phrase-precision
+
+doc_names:
+  - 3M_2024_10K
+
+question: >
+  In 3M's 2024 annual report, which firm signed the audit report, from which
+  city, on what date, and since what year has it served as 3M's auditor?
+
+intent: >
+  Four exact facts in one signature block, and two of them are years that
+  mean opposite things - 1975 is when the engagement began, 2025 is when the
+  report was signed. An audit report is always dated AFTER the fiscal year it
+  covers, so a system anchoring on "2024 annual report" reports 2024 as the
+  report date. The phrase "auditor since" appears on one page of 238, with no
+  semantic neighbourhood a vector channel can reach, while the firm's name
+  appears on three pages - two of which are management's internal-control
+  statement, not the audit report itself.
+
+answer: |
+  **PricewaterhouseCoopers LLP**, of **Minneapolis, Minnesota**, signed the
+  report on **February 5, 2025**, and has served as 3M's auditor **since
+  1975**.
+
+formula: null
+
+evidence:
+  - "3M_2024_10K: Page 87 · Report of Independent Registered Public Accounting Firm · text"
+
+verified: true
+
+notes: >
+  Verbatim from page 87: "/s/ PricewaterhouseCoopers LLP Minneapolis,
+  Minnesota February 5, 2025 We have served as the Company's auditor since
+  1975."
+
+  Measured: "auditor since" appears on page 87 ONLY, of 238 pages.
+  "PricewaterhouseCoopers" appears on pages 82, 87 and 225 - but 82 and 225
+  are both management's own internal-control assertion ("has been audited by
+  PricewaterhouseCoopers LLP, an independent registered public accounting
+  firm, as stated in their report"), not the signed report. A system citing
+  either has the right firm from the wrong disclosure, and neither of those
+  pages carries the city, date or tenure year.
+
+  Third trap, and the one worth demoing: the report is dated February 5,
+  2025 for the FISCAL 2024 annual report. Same one-year offset as the proxy
+  convention already in the skills file - an audit report is signed after
+  the year it covers - so a question phrased "in the 2024 annual report"
+  invites 2024 as the answer.
+
+  Replaced the original 3m-007 (registered debt securities), whose topic
+  came from FinanceBench's 3M set. This question was found independently by
+  scanning the corpus for rare exact tokens; no external question set was
+  consulted.

@@ -27,7 +27,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from eval import judge, phases  # noqa: E402
 from eval.corpora import load as load_corpus  # noqa: E402
 from prism import (  # noqa: E402
-    catalog, concepts, config, couchbase_io, dictionary, retrieval, runtime, trace,
+    catalog, concepts, config, couchbase_io, dictionary, retrieval, runtime, skills,
+    trace,
 )
 from prism import initialize as prism_initialize  # noqa: E402
 from prism import s3_upload  # noqa: E402
@@ -135,22 +136,28 @@ PHASE_HELP = {
     "3-hybrid": "Preferred · BM25 + content anchors + kNN via SEARCH(), "
                 "with binding, deterministic calculation and governance",
 }
-FUSION_LABELS = {"score": "Additive (default)", "native-rrf": "Native RRF",
-                 "native-rsf": "Native RSF", "rrf": "RRF in code"}
+FUSION_LABELS = {"score": "Additive", "native-rrf": "Native RRF",
+                 "native-rsf": "Native RSF (default)", "rrf": "RRF in code"}
 FUSION_HELP = {
     "score": "Bleve's default: weighted addition of the lexical and vector scores. "
              "Sensitive to the two scores being on different scales, so a "
-             "lexical-only hit can lose to every vector hit - but measured equal to "
-             "RRF and RSF on recall over 143 questions.",
+             "lexical-only hit can lose to every vector hit - measured equal to RRF "
+             "and RSF on recall over 143 questions, but FAILED a real single-question "
+             "phrase-precision case (3m-007) that RSF and in-code RRF both passed.",
     "native-rrf": "Server-side reciprocal rank fusion, 1/(k + rank), one SEARCH(). "
                   "Needs Couchbase 8.1 - on 8.0.1 the score field parsed and was "
-                  "silently ignored. Channel weights come from each query's boost.",
+                  "silently ignored. Channel weights come from each query's boost. "
+                  "Also FAILED 3m-007 despite an identical rank_constant to in-code "
+                  "RRF - traced to a much wider internal candidate window (150 vs "
+                  "in-code's 20 per leg) pushing a correct chunk down in rank.",
     "native-rsf": "Relative score fusion: min-max normalise each channel into "
                   "[0,1], then add with the query boosts as weights. Keeps score "
-                  "magnitude, but one outlier skews the normalisation.",
+                  "magnitude, but one outlier skews the normalisation. Default as of "
+                  "this measured case - passed 3m-007 where additive and native-rrf "
+                  "both failed.",
     "rrf": "Two SEARCH channels unioned in one statement, fused in application "
            "code. Works on any version, and the only option that reports each "
-           "channel's rank and contribution per chunk.",
+           "channel's rank and contribution per chunk. Passed 3m-007.",
 }
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PRISM_MARK = REPO_ROOT / "app" / "assets" / "prism-mark.png"
@@ -200,6 +207,15 @@ def tuning_panel(fusion: str) -> dict:
 @st.cache_data(ttl=60, show_spinner=False)
 def load_catalog(scope: str):
     return catalog.load_all(scope=scope)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_verify_filing_term(term: str, scope: str) -> int:
+    # Cached, not live-checked on every keystroke - the Concepts tab renders
+    # this per filing_term on every page load, and Streamlit reruns the
+    # whole script on each interaction, so an uncached check would query
+    # Couchbase far more than the corpus (which changes rarely) justifies.
+    return concepts.verify_filing_term(term, scope=scope)
 
 
 @st.cache_data(show_spinner=False)
@@ -1302,7 +1318,7 @@ with st.sidebar:
 
     if phases.get(phase).bm25:
         fusion = st.segmented_control(
-            "Hybrid fusion", list(FUSION_LABELS), default="score", required=True,
+            "Hybrid fusion", list(FUSION_LABELS), default="native-rsf", required=True,
             width="stretch", format_func=lambda f: FUSION_LABELS[f])
         st.caption(FUSION_HELP[fusion])
         tuning = tuning_panel(fusion)
@@ -1653,7 +1669,7 @@ with tab_governance:
                "raw JSON - the two fields dictionary entries never ask for (the "
                "executable formula, its content anchors) are generated automatically "
                "on save, same as dictionary.compile always has.")
-    manage = st.segmented_control("Manage", ["Dictionary", "Concepts"],
+    manage = st.segmented_control("Manage", ["Dictionary", "Concepts", "Skills"],
                                   default="Dictionary")
 
     if manage == "Dictionary":
@@ -1814,14 +1830,18 @@ with tab_governance:
                 st.session_state.pop("editing_dict_id", None)
                 st.rerun()
 
-    else:
+    elif manage == "Concepts":
         concept_entries = concepts_data.get("entries", [])
         section("Concepts", f"{len(concept_entries)} entries in {scope}",
                ":material/travel_explore:")
-        st.caption("How this feeds retrieval: a matched concept's official filing "
-                  "terms and target sections join the same forced-phrase list "
-                  "#hash# spans use, once resolve_and_plan recognizes the question "
-                  "names it. Still architecture-only for corpora with none yet.")
+        st.caption("How this feeds retrieval: a question naming a concept's `user_term` "
+                  "pulls its `filing_terms` into the same forced-phrase list #hash# spans "
+                  "use, once resolve_and_plan recognizes the question names it. Two fields "
+                  "only - what a person might type, and what this corpus's own filings "
+                  "actually call it. Each filing term below is checked against the corpus "
+                  "itself (whole phrase, not its individual words) - 0 hits means the term "
+                  "doesn't appear anywhere in this scope's documents and should be fixed "
+                  "or dropped.")
         if not concept_entries:
             st.caption("Empty. Add a concept below.")
         for entry in concept_entries:
@@ -1829,15 +1849,12 @@ with tab_governance:
                 cols = st.columns([5, 1, 1])
                 with cols[0]:
                     st.markdown(f"**{entry.get('user_term', '(untitled)')}**")
-                    if entry.get("aliases"):
-                        st.caption("Aliases: " + ", ".join(entry["aliases"]))
-                    if entry.get("official_filing_terms"):
-                        st.caption("Official filing terms: "
-                                  + ", ".join(entry["official_filing_terms"]))
-                    if entry.get("target_sections"):
-                        st.caption("Target sections: " + ", ".join(entry["target_sections"]))
-                    if entry.get("subsidiaries_involved"):
-                        st.caption("Subsidiaries: " + ", ".join(entry["subsidiaries_involved"]))
+                    for term in entry.get("filing_terms") or []:
+                        hits = _cached_verify_filing_term(term, scope)
+                        icon = ":material/check_circle:" if hits else ":material/warning:"
+                        color = "green" if hits else "orange"
+                        st.badge(f"{term} ({hits} hits)" if hits else f"{term} - 0 hits",
+                                icon=icon, color=color)
                 with cols[1]:
                     if st.button("Edit", key=f"concept_edit_{entry['id']}", width="stretch"):
                         st.session_state["editing_concept_id"] = entry["id"]
@@ -1865,31 +1882,19 @@ with tab_governance:
                 user_term = st.text_input(
                     "User term", key=f"concept_term_{concept_target}",
                     value=(editing_concept or {}).get("user_term", ""),
-                    placeholder="e.g. forever chemicals")
-                aliases = st.multiselect(
-                    "Aliases", key=f"concept_aliases_{concept_target}",
-                    options=(editing_concept or {}).get("aliases", []),
-                    default=(editing_concept or {}).get("aliases", []),
+                    placeholder="e.g. forever chemicals",
+                    help="What a person is expected to type in a question - the "
+                        "match trigger. Not a list; if this corpus's own filings "
+                        "use several names for the thing, those go below.")
+                filing_terms = st.multiselect(
+                    "Filing terms", key=f"concept_filing_terms_{concept_target}",
+                    options=(editing_concept or {}).get("filing_terms", []),
+                    default=(editing_concept or {}).get("filing_terms", []),
                     accept_new_options=True,
-                    placeholder="Type a term a person might use, press enter")
-                official_filing_terms = st.multiselect(
-                    "Official filing terms", key=f"concept_terms_{concept_target}",
-                    options=(editing_concept or {}).get("official_filing_terms", []),
-                    default=(editing_concept or {}).get("official_filing_terms", []),
-                    accept_new_options=True,
-                    placeholder="Exact wording expected verbatim in a filing")
-                target_sections = st.multiselect(
-                    "Target sections", key=f"concept_sections_{concept_target}",
-                    options=(editing_concept or {}).get("target_sections", []),
-                    default=(editing_concept or {}).get("target_sections", []),
-                    accept_new_options=True,
-                    placeholder="e.g. Legal Proceedings")
-                subsidiaries_involved = st.multiselect(
-                    "Subsidiaries involved (optional)",
-                    key=f"concept_subs_{concept_target}",
-                    options=(editing_concept or {}).get("subsidiaries_involved", []),
-                    default=(editing_concept or {}).get("subsidiaries_involved", []),
-                    accept_new_options=True)
+                    placeholder="Exact wording this corpus's own filings use, press enter",
+                    help="Whole phrases, not single words - verified against the "
+                        "corpus after saving (the badges above show 0 hits for "
+                        "anything not actually present).")
                 submitted = st.form_submit_button(
                     "Save changes" if editing_concept else "Add concept",
                     icon=":material/check:", type="primary")
@@ -1900,12 +1905,8 @@ with tab_governance:
                         updated = {
                             "id": editing_concept["id"] if editing_concept else str(uuid.uuid4()),
                             "user_term": user_term,
-                            "aliases": aliases,
-                            "official_filing_terms": official_filing_terms,
-                            "target_sections": target_sections,
+                            "filing_terms": filing_terms,
                         }
-                        if subsidiaries_involved:
-                            updated["subsidiaries_involved"] = subsidiaries_involved
                         remaining = [e for e in concept_entries
                                     if e["id"] != (editing_concept or {}).get("id")]
                         remaining.append(updated)
@@ -1915,4 +1916,28 @@ with tab_governance:
                         st.rerun()
             if editing_concept and st.button("Cancel edit", key="concept_cancel_edit"):
                 st.session_state.pop("editing_concept_id", None)
+                st.rerun()
+
+    else:
+        skill_lines = skills.load(scope=scope)
+        section("Skills", f"{len(skill_lines)} statements in {scope}",
+               ":material/school:")
+        st.caption("Domain-expert-owned filing-mechanics knowledge - how documents "
+                  "in this domain are typically organised, which form structurally "
+                  "carries what. Appended to resolve_and_plan's own system prompt "
+                  "as-is, one plain sentence per line - never a JSON-shape rule, "
+                  "never one company's own vocabulary (that's Concepts) or an "
+                  "approved formula (that's Dictionary). See "
+                  "docs/adr/0003-skills-a-domain-expert-owned-knowledge-layer.md.")
+        with st.form("skills_form", border=False):
+            skills_text = st.text_area(
+                "One skill per line", value="\n".join(skill_lines), height=240,
+                placeholder="e.g. A proxy statement (DEF 14A) is dated the year "
+                           "after the compensation year it discloses.",
+                label_visibility="collapsed")
+            if st.form_submit_button("Save skills", icon=":material/check:",
+                                     type="primary"):
+                skills.save(skills_text.splitlines(), scope=scope)
+                st.toast(f"Saved {len([l for l in skills_text.splitlines() if l.strip()])} "
+                        "skills.", icon=":material/check_circle:")
                 st.rerun()

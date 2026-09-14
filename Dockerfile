@@ -33,7 +33,11 @@ COPY eval/ ./eval/
 COPY design/ ./design/
 COPY docs/ ./docs/
 COPY tests/ ./tests/
-COPY manage.py VERSION README.md LICENSE config.example.yaml ./
+# skills.yaml (unlike config.yaml) holds no secrets - a seeded default ships
+# in the image so every deployment method works, not only docker-compose's
+# read-write bind mount (docker-compose.yml); that mount is what lets edits
+# made through the Skills tab persist past a container restart.
+COPY manage.py VERSION README.md LICENSE config.example.yaml skills.yaml ./
 COPY .streamlit/ ./.streamlit/
 
 # Runs as a non-root user - this is a POC/demo/learning tool, not a product

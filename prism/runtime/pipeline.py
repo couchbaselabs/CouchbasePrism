@@ -107,15 +107,15 @@ def answer_question(question: str, catalog_docs: list, dictionary_data: dict = N
             reverse=True)
         doc_name = documents[0]["doc_name"] if documents else None
         plan = resolution_detail["plan"]
-        # A matched concept's own official_filing_terms/aliases join the
-        # SAME forced_phrases leg #...# spans already use - both are "match
-        # this verbatim, the question's own wording won't" signals to the
-        # lexical channel, not a separate mechanism. target_sections join
-        # too: a section header ("Legal Proceedings") is itself a phrase
-        # reasonably expected to appear verbatim in the source.
+        # A matched concept's own filing_terms join the SAME forced_phrases
+        # leg #...# spans use - both are "match this verbatim, the
+        # question's own wording won't" signals to the lexical channel, not
+        # a separate mechanism. Each filing_term is corpus-verified (see
+        # prism/concepts/verification.py) before it ever lands here, so this
+        # list stays short and precise rather than the dozen-plus loosely-
+        # related phrases an earlier, unverified schema produced.
         concept_terms = resolution_detail.get("concepts", {})
-        for term in (concept_terms.get("expanded_terms", [])
-                    + concept_terms.get("target_sections", [])):
+        for term in concept_terms.get("filing_terms", []):
             if term not in forced_phrases:
                 forced_phrases.append(term)
     entry = next((d for d in catalog_docs if d.get("doc_name") == doc_name), None)

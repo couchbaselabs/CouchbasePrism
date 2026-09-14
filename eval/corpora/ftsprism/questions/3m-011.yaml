@@ -1,0 +1,50 @@
+number: 11
+title: Quick Ratio Verdict — Q2 2023
+
+category: governed-formula
+
+doc_names:
+  - 3M_2023_Q2_10Q
+
+question: >
+  Does 3M have a healthy liquidity profile based on its quick ratio for the
+  second quarter of 2023?
+
+intent: >
+  The question asks for a judgment, not a number - and the quick ratio has
+  several individually defensible conventions that land on opposite sides of
+  a 1.0 threshold. With no approved dictionary entry a system must compute
+  the candidates and DECLINE the verdict, because calling 0.96 "unhealthy"
+  means inventing a threshold nobody approved. With an entry it may answer
+  outright. This is the cold/warm demonstration: the same question, two
+  correct behaviours, decided by governance rather than by the model.
+
+answer: |
+  3M's quick ratio at June 30, 2023 was **0.96** (0.9578): (total current
+  assets - total inventories) / total current liabilities =
+  ($15,754M - $5,280M) / $10,936M.
+
+  Against the approved threshold of 1.0, that is below healthy.
+
+formula: (total_current_assets - inventory) / total_current_liabilities
+
+evidence:
+  - "3M_2023_Q2_10Q: Page 10 · Consolidated Balance Sheet · table"
+
+verified: true
+
+notes: >
+  Verified against the PDF: total current assets 15,754; total inventories
+  5,280; total current liabilities 10,936 at June 30, 2023.
+  (15,754 - 5,280) / 10,936 = 0.9578, matching the figure the README's own
+  two-pass demo cites.
+
+  THE CORRECT ANSWER DEPENDS ON DICTIONARY STATE. This gold is written for
+  the WARM state, where an approved "Quick Ratio - Preferred - Acid-Test"
+  entry with healthy >= 1.0 exists. With an EMPTY dictionary the correct
+  behaviour is different and equally right: report the candidate values and
+  decline the verdict, because no approved interpretation policy exists.
+  Run it both ways - that delta is the demo.
+
+  Pairs with 3m-006, which asks the same metric for Q3 2022 as a pure
+  quantity. 006 tests the calculation; this tests the authority to judge it.

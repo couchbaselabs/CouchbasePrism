@@ -1,0 +1,52 @@
+number: 8
+title: Litigation Payments and Operating Cash Flow
+
+category: concept-semantic
+
+doc_names:
+  - 3M_2024_10K
+
+question: >
+  According to 3M's 2024 annual report, how did the forever-chemicals and
+  earplug-lawsuit matters affect operating cash flow?
+
+intent: >
+  The question names both matters the way a person would - "forever
+  chemicals", "earplug lawsuit" - and the filing uses neither phrase
+  anywhere. It says PFAS, CAE, Combat Arms and Aearo. Retrieval has to cross
+  that vocabulary gap before any other stage can do its job, which is exactly
+  what the approved concept mappings exist for. Without them a system
+  searches for words that appear zero times in the document and retrieves on
+  the remaining generic terms.
+
+answer: |
+  Operating cash flow decreased **$4.9 billion** in 2024 against 2023,
+  primarily driven by approximately **$4.6 billion** in payments associated
+  with PFAS-related other environmental liabilities and the CAE legal
+  settlement.
+
+  Net cash provided by operating activities was $1,819 million in 2024
+  against $6,680 million in 2023.
+
+formula: null
+
+evidence:
+  - "3M_2024_10K: Page 77 · Financial Condition and Liquidity - Cash Flows from Operating Activities · text"
+  - "3M_2024_10K: Page 97 · Consolidated Statement of Cash Flows · table"
+
+verified: true
+
+notes: >
+  Page 77 verbatim: "In 2024, cash flows provided by operating activities
+  decreased $4.9 billion compared to the same period last year, primarily
+  driven by approximately $4.6 billion in payments associated with
+  PFAS-related other environmental liabilities and the CAE legal settlement
+  (both discussed in Note 19)."
+
+  Measured vocabulary gap in this filing: "PFAS" appears on 59 pages,
+  "Combat Arms" on 13, "Aearo" on 15, "CAE" on 17 - while the question's own
+  words ("forever chemicals", "earplug lawsuit") appear on none.
+
+  Distractor: the same $4.6 billion figure also appears on page 75, but there
+  it explains the change in the CASH BALANCE, not operating cash flow. Page
+  77 is the operating-cash-flow discussion and is the correct citation.
