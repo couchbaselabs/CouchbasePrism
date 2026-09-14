@@ -203,6 +203,15 @@ def load_catalog(scope: str):
     return catalog.load_all(scope=scope)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_verify_filing_term(term: str, scope: str) -> int:
+    # Cached, not live-checked on every keystroke - the Concepts tab renders
+    # this per filing_term on every page load, and Streamlit reruns the
+    # whole script on each interaction, so an uncached check would query
+    # Couchbase far more than the corpus (which changes rarely) justifies.
+    return concepts.verify_filing_term(term, scope=scope)
+
+
 @st.cache_data(show_spinner=False)
 def load_questions():
     # PRISM's own open corpus - the demo runs on this, not whatever internal
@@ -1819,10 +1828,14 @@ with tab_governance:
         concept_entries = concepts_data.get("entries", [])
         section("Concepts", f"{len(concept_entries)} entries in {scope}",
                ":material/travel_explore:")
-        st.caption("How this feeds retrieval: a matched concept's official filing "
-                  "terms and target sections join the same forced-phrase list "
-                  "#hash# spans use, once resolve_and_plan recognizes the question "
-                  "names it. Still architecture-only for corpora with none yet.")
+        st.caption("How this feeds retrieval: a question naming a concept's `user_term` "
+                  "pulls its `filing_terms` into the same forced-phrase list #hash# spans "
+                  "use, once resolve_and_plan recognizes the question names it. Two fields "
+                  "only - what a person might type, and what this corpus's own filings "
+                  "actually call it. Each filing term below is checked against the corpus "
+                  "itself (whole phrase, not its individual words) - 0 hits means the term "
+                  "doesn't appear anywhere in this scope's documents and should be fixed "
+                  "or dropped.")
         if not concept_entries:
             st.caption("Empty. Add a concept below.")
         for entry in concept_entries:
@@ -1830,15 +1843,12 @@ with tab_governance:
                 cols = st.columns([5, 1, 1])
                 with cols[0]:
                     st.markdown(f"**{entry.get('user_term', '(untitled)')}**")
-                    if entry.get("aliases"):
-                        st.caption("Aliases: " + ", ".join(entry["aliases"]))
-                    if entry.get("official_filing_terms"):
-                        st.caption("Official filing terms: "
-                                  + ", ".join(entry["official_filing_terms"]))
-                    if entry.get("target_sections"):
-                        st.caption("Target sections: " + ", ".join(entry["target_sections"]))
-                    if entry.get("subsidiaries_involved"):
-                        st.caption("Subsidiaries: " + ", ".join(entry["subsidiaries_involved"]))
+                    for term in entry.get("filing_terms") or []:
+                        hits = _cached_verify_filing_term(term, scope)
+                        icon = ":material/check_circle:" if hits else ":material/warning:"
+                        color = "green" if hits else "orange"
+                        st.badge(f"{term} ({hits} hits)" if hits else f"{term} - 0 hits",
+                                icon=icon, color=color)
                 with cols[1]:
                     if st.button("Edit", key=f"concept_edit_{entry['id']}", width="stretch"):
                         st.session_state["editing_concept_id"] = entry["id"]
@@ -1866,31 +1876,19 @@ with tab_governance:
                 user_term = st.text_input(
                     "User term", key=f"concept_term_{concept_target}",
                     value=(editing_concept or {}).get("user_term", ""),
-                    placeholder="e.g. forever chemicals")
-                aliases = st.multiselect(
-                    "Aliases", key=f"concept_aliases_{concept_target}",
-                    options=(editing_concept or {}).get("aliases", []),
-                    default=(editing_concept or {}).get("aliases", []),
+                    placeholder="e.g. forever chemicals",
+                    help="What a person is expected to type in a question - the "
+                        "match trigger. Not a list; if this corpus's own filings "
+                        "use several names for the thing, those go below.")
+                filing_terms = st.multiselect(
+                    "Filing terms", key=f"concept_filing_terms_{concept_target}",
+                    options=(editing_concept or {}).get("filing_terms", []),
+                    default=(editing_concept or {}).get("filing_terms", []),
                     accept_new_options=True,
-                    placeholder="Type a term a person might use, press enter")
-                official_filing_terms = st.multiselect(
-                    "Official filing terms", key=f"concept_terms_{concept_target}",
-                    options=(editing_concept or {}).get("official_filing_terms", []),
-                    default=(editing_concept or {}).get("official_filing_terms", []),
-                    accept_new_options=True,
-                    placeholder="Exact wording expected verbatim in a filing")
-                target_sections = st.multiselect(
-                    "Target sections", key=f"concept_sections_{concept_target}",
-                    options=(editing_concept or {}).get("target_sections", []),
-                    default=(editing_concept or {}).get("target_sections", []),
-                    accept_new_options=True,
-                    placeholder="e.g. Legal Proceedings")
-                subsidiaries_involved = st.multiselect(
-                    "Subsidiaries involved (optional)",
-                    key=f"concept_subs_{concept_target}",
-                    options=(editing_concept or {}).get("subsidiaries_involved", []),
-                    default=(editing_concept or {}).get("subsidiaries_involved", []),
-                    accept_new_options=True)
+                    placeholder="Exact wording this corpus's own filings use, press enter",
+                    help="Whole phrases, not single words - verified against the "
+                        "corpus after saving (the badges above show 0 hits for "
+                        "anything not actually present).")
                 submitted = st.form_submit_button(
                     "Save changes" if editing_concept else "Add concept",
                     icon=":material/check:", type="primary")
@@ -1901,12 +1899,8 @@ with tab_governance:
                         updated = {
                             "id": editing_concept["id"] if editing_concept else str(uuid.uuid4()),
                             "user_term": user_term,
-                            "aliases": aliases,
-                            "official_filing_terms": official_filing_terms,
-                            "target_sections": target_sections,
+                            "filing_terms": filing_terms,
                         }
-                        if subsidiaries_involved:
-                            updated["subsidiaries_involved"] = subsidiaries_involved
                         remaining = [e for e in concept_entries
                                     if e["id"] != (editing_concept or {}).get("id")]
                         remaining.append(updated)

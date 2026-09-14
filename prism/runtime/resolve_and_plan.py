@@ -184,19 +184,23 @@ MANIFEST: {manifest}
 
 def _match_concepts(subject_words: list, concepts_data: dict) -> list:
     """PLACEHOLDER for this experiment only - a plain substring match
-    against user_term/aliases, not the FTS-search-against-the-concepts-
-    collection design discussed separately. Keeps concept-naming
-    questions from silently losing forced-phrase support while this
-    branch is evaluated; not the intended final mechanism."""
+    against `user_term`, not the FTS-search-against-the-concepts-collection
+    design discussed separately. Keeps concept-naming questions from
+    silently losing forced-phrase support while this branch is evaluated;
+    not the intended final mechanism.
+
+    Matches on `user_term` alone, not a list of aliases - `user_term` is
+    what a person is expected to type; if a corpus's own filings use several
+    names for the same thing, those belong in `filing_terms` (the SEARCH
+    side), not as additional trigger phrases on the MATCH side. Conflating
+    the two was the earlier design's own defect (see prism/concepts's
+    docstring) - a filing-side synonym ("GenX") ending up as a MATCH trigger
+    when nobody would ever ask a question using it."""
     words = " ".join(subject_words or []).lower()
     if not words:
         return []
-    matched = []
-    for entry in concepts_data.get("entries", []):
-        terms = [entry.get("user_term", "")] + (entry.get("aliases") or [])
-        if any(t and t.lower() in words for t in terms):
-            matched.append(entry)
-    return matched
+    return [entry for entry in concepts_data.get("entries", [])
+           if entry.get("user_term") and entry["user_term"].lower() in words]
 
 
 def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict = None,
@@ -213,8 +217,9 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
      "formulas": [...the model's own proposed formula candidates - NEW,
         replaces calculation.propose_candidates() for this experiment...],
      "concepts": {"subject_words": [...], "matched": [...full concept
-        records, looked up by id...], "expanded_terms": [...],
-        "target_sections": [...]}}.
+        records, looked up by id...], "filing_terms": [...each matched
+        concept's own filing_terms, deduped, for pipeline.py's
+        forced_phrases...]}}.
     """
     manifest = manifest if manifest is not None else catalog_manifest.load(scope)
     concepts_data = (concepts_data if concepts_data is not None
@@ -260,14 +265,11 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
     formulas = result.get("formulas") or []
 
     matched = _match_concepts(result.get("subject_words") or [], concepts_data)
-    expanded_terms, target_sections = [], []
+    filing_terms = []
     for c in matched:
-        for term in (c.get("official_filing_terms") or []) + (c.get("aliases") or []):
-            if term and term not in expanded_terms:
-                expanded_terms.append(term)
-        for section in c.get("target_sections") or []:
-            if section and section not in target_sections:
-                target_sections.append(section)
+        for term in c.get("filing_terms") or []:
+            if term and term not in filing_terms:
+                filing_terms.append(term)
 
     documents = resolve_documents(intent.get("companies") or [],
                                   intent.get("doc_types") or [],
@@ -286,7 +288,6 @@ def resolve_and_plan(question: str, manifest: dict = None, concepts_data: dict =
         "concepts": {
             "subject_words": result.get("subject_words") or [],
             "matched": matched,
-            "expanded_terms": expanded_terms,
-            "target_sections": target_sections,
+            "filing_terms": filing_terms,
         },
     }
