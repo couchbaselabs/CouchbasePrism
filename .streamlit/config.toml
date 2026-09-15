@@ -1,3 +1,11 @@
+[server]
+# Serves files under app/static/ at <host>/app/static/<file> - used for the
+# bundled setup guide (app/static/setup-guide.html), linked from the Setup
+# tab's own "Setup guide" button. A relative URL, so it resolves against
+# whatever host/port the viewer is already on - works identically in
+# Docker, docker-compose, or a bare `streamlit run`.
+enableStaticServing = true
+
 [theme]
 base = "light"
 primaryColor = "#0B6B69"

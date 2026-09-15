@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PRISM setup guide</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --accent: #0B6B69;
+    --text: #172B2D;
+    --bg: #FFFFFF;
+    --panel: #F3F7F7;
+    --border: #D7E3E3;
+    --code-bg: #EAF2F2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #4FD1CB;
+      --text: #E8F2F2;
+      --bg: #10181A;
+      --panel: #182426;
+      --border: #2B3B3D;
+      --code-bg: #1C2A2C;
+    }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.6rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; color: var(--accent); }
+  h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+  code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+  }
+  .intro {
+    background: var(--panel);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 1rem 1.25rem;
+  }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.35rem 0; }
+  strong { color: var(--accent); }
+  .note {
+    font-size: 0.92em;
+    opacity: 0.85;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Setup guide: from a blank Capella project to a running PRISM</h1>
+
+<p class="intro">
+This is the full walkthrough behind PRISM's own "fill in Capella, AI Data
+Plane, AWS, OpenAI, domains" instruction — follow it once, end to end,
+before your first <strong>Initialize</strong>. Every "copy" callout below is
+a value you'll paste into <code>config.yaml</code> or a workflow form a few
+steps later; the example values shown (<code>acme</code>,
+<code>AKIA...</code>, <code>cb.p8x...</code>) are placeholders, not real
+credentials.
+</p>
+
+<h2>Prerequisites</h2>
+
+<h3>1. Capella cluster</h3>
+<p>Create (or use an existing) Capella cluster, then:</p>
+<pre><code>bucket:  prism
+  scope: secfilings
+    collections: docs, catalog, dictionary, concepts</code></pre>
+<p>Create a database user with read/write access to all buckets, scopes, and
+collections (RBAC), and allow IP access from anywhere (or your own IP
+range, if you'd rather scope it down).</p>
+<div class="panel">
+<strong>Copy (example):</strong>
+<ul>
+  <li><strong>Connection endpoint</strong>: <code>cb.p8x********.cloud.couchbase.com</code>
+      (no <code>couchbases://</code> prefix — <code>config.yaml</code>'s
+      <code>couchbase.connectionString</code> wants the bare host)</li>
+  <li><strong>User access credentials</strong> (username/password)</li>
+</ul>
+</div>
+
+<h3>2. AWS S3</h3>
+<p>Create an S3 bucket and a folder inside it to stage the sample PDFs for
+ingestion:</p>
+<ul>
+  <li>Bucket (example): <code>acme</code></li>
+  <li>Folder (example): <code>Prism/3M</code></li>
+</ul>
+<div class="panel">
+<strong>Copy (example):</strong>
+<ul>
+  <li><strong>Bucket</strong>: <code>acme</code> → <code>config.yaml</code>'s <code>aws.bucket</code></li>
+  <li><strong>Region</strong>: <code>us-west-2</code> → <code>config.yaml</code>'s <code>aws.region</code></li>
+  <li><strong>Folder</strong>: <code>Prism/3M</code> → <code>config.yaml</code>'s
+      <code>domains.secfilings.awsFolder</code>. Keep the <code>3M</code>
+      subfolder exactly as shown if you're using the packaged sample corpus —
+      the ingested filenames encode this folder path, so a mismatch here
+      means retrieval can't map an ingested chunk back to its catalog entry.
+      A different corpus would use a different folder; nothing requires
+      "3M" specifically, only that S3, the workflow, and
+      <code>config.yaml</code> all agree on the same value.</li>
+  <li><strong>AWS access key ID</strong> and <strong>AWS secret access key</strong>
+      for a user with read/write on this bucket.</li>
+</ul>
+</div>
+
+<h3>3. Upload the sample PDFs to S3</h3>
+<p>Once <code>config.yaml</code> has the bucket/folder above filled in, use
+the app's Setup tab to upload the sample PDFs — enter the access key
+ID/secret there and it stages them into the S3 bucket/folder for you.</p>
+<p class="note">
+The bucket name and folder are read from <code>config.yaml</code> and
+aren't editable in that form. One-time step — you don't need to re-upload
+once the workflow below has ingested them. This S3 bucket/folder is what
+the AI Data Plane Workflow (next section) points at.
+</p>
+
+<h2>AI Data Plane Workflow</h2>
+
+<h3>Deploy a model</h3>
+<p>You need a text-to-embedding model deployed. Example:
+<code>nvidia/llama-3.2-nv-embedqa-1b-v2</code>.</p>
+<ol>
+  <li><strong>Name</strong>: your choice.</li>
+  <li><strong>Region</strong>: the same region as your Capella cluster.</li>
+  <li><strong>Compute and size</strong>: your choice.</li>
+  <li><strong>Advanced configuration</strong>: your choice — leave blank for a demo.</li>
+</ol>
+<p>Once the model shows healthy, expand its row (the down-arrow in the UI) and copy:</p>
+<div class="panel">
+<ul>
+  <li><strong>Model ID</strong> (example: <code>a16def04-0345-*******-*****</code>)</li>
+  <li><strong>Model endpoint</strong> (example: <code>https://itwg*******-cw.ai.cloud.couchbase.com</code>)</li>
+</ul>
+Both go into <code>config.yaml</code>'s <code>aiDataPlane.modelId</code> /
+<code>aiDataPlane.modelEndpoint</code>.
+</div>
+
+<h3>Generate API keys for the model</h3>
+<ol>
+  <li><strong>API key name</strong>: your choice.</li>
+  <li><strong>Expiration days</strong>: default (180) is fine.</li>
+  <li><strong>Region</strong>: same as the model's.</li>
+  <li><strong>Description</strong>: your choice.</li>
+  <li><strong>Allowed IP address</strong>: allow access from anywhere.</li>
+  <li><strong>CIDR block</strong>: <code>0.0.0.0/0</code>.</li>
+</ol>
+<div class="panel">
+<strong>Generate the key and copy:</strong>
+<ul>
+  <li><strong>API key ID</strong> (example: <code>ec7186ee-a359********</code>) —
+      keep this, but note it is <strong>not</strong> what goes in <code>config.yaml</code>.</li>
+  <li><strong>API key token</strong> (example: <code>cbsk-v1_*******</code>) —
+      this is what goes in <code>config.yaml</code>'s <code>aiDataPlane.apiKey</code>.
+      Using the key ID instead of the token produces a 401 that reads like a
+      bad endpoint, not a bad key — a real, easy-to-make mistake worth
+      double-checking.</li>
+</ul>
+</div>
+
+<h3>Create the workflow</h3>
+<ol>
+  <li>Choose <strong>Unstructured Data from External Sources</strong>.</li>
+  <li><strong>Workflow name</strong>: your choice.</li>
+</ol>
+
+<h3>Configure the workflow</h3>
+<p><strong>Data source</strong> — add a new S3 bucket integration:</p>
+<ol>
+  <li><strong>Integration name</strong>: your choice.</li>
+  <li><strong>Bucket</strong>: <code>acme</code> (from <code>config.yaml</code>'s <code>aws.bucket</code>).</li>
+  <li><strong>Folder path</strong>: <code>Prism/3M</code> (from <code>config.yaml</code>'s <code>domains.secfilings.awsFolder</code>).</li>
+  <li><strong>Access key ID</strong> / <strong>Secret access key</strong>: the same S3 credentials from above.</li>
+</ol>
+
+<p><strong>Destination:</strong></p>
+<ol>
+  <li><strong>Extract S3 metadata fields</strong>: unchecked.</li>
+  <li><strong>Destination cluster</strong>: your Capella cluster.</li>
+  <li><strong>Destination bucket</strong>: <code>prism</code>.</li>
+  <li><strong>Destination scope</strong>: <code>secfilings</code>.</li>
+  <li><strong>Destination collection</strong>: <code>docs</code>.</li>
+</ol>
+
+<p><strong>Document processing</strong> (next page):</p>
+<ol>
+  <li><strong>Include page range</strong>: unchecked.</li>
+  <li><strong>Exclude tables</strong>: unchecked.</li>
+  <li><strong>Exclude footer</strong>: checked.</li>
+  <li><strong>Exclude header</strong>: unchecked.</li>
+  <li><strong>Enable OCR</strong>: unchecked.</li>
+</ol>
+
+<p><strong>Chunking strategy:</strong></p>
+<ul>
+  <li><strong>Strategy</strong>: <code>RECURSIVE_SPLITTER</code>.</li>
+  <li><strong>Max token</strong>: <code>2000</code>.</li>
+  <li><strong>Chunk overlap</strong>: <code>50</code>.</li>
+</ul>
+
+<p><strong>Embedding model</strong> (next page):</p>
+<ol>
+  <li><strong>Model source</strong>: Capella model.</li>
+  <li>Select the embedding model you deployed above.</li>
+  <li><strong>API key ID</strong> / <strong>API key token</strong>: from the step above.</li>
+</ol>
+
+<p>Deploy the workflow and wait for it to complete — it should ingest all
+64 sample documents successfully.</p>
+
+<h2>Then: Initialize</h2>
+<p>
+Once ingestion finishes, run <strong>Initialize</strong> — the Setup tab's
+own button, or <code>manage.py initialize</code>. This is the one remaining
+step, and it's fully automatic: it rebuilds the docs and catalog search
+indexes, rebuilds the catalog from the ingested chunks, and seeds the
+dictionary and concepts collections from <code>dictionary.yaml</code>/
+<code>concepts.yaml</code> — all from this one ingested corpus, no manual
+data entry. Destructive-but-safe to re-run: each step is a full
+rebuild/reseed, not an incremental update, so running it again always
+leaves the same, known-good state. After it completes you're ready to ask
+questions — nothing else to configure.
+</p>
+
+</body>
+</html>

@@ -1388,6 +1388,12 @@ with tab_setup:
                "dictionary from what it ingests. Each section runs independently - "
                "coming back to run Initialize alone, without re-uploading, is the "
                "normal case, not a special one.")
+    st.link_button(
+        "Setup guide (Capella, S3, AI Data Plane Workflow)",
+        "app/static/setup-guide.html", icon=":material/menu_book:",
+        help="The full walkthrough behind this tab - cluster/bucket setup, S3 "
+            "staging, and every AI Data Plane Workflow field, before the steps "
+            "below. Opens in a new tab; same doc as docs/setup-guide.md.")
 
     section("Upload sample PDFs to S3", icon=":material/upload:",
             caption="Straight upload, no S3 object metadata, no per-company "
