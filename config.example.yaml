@@ -7,9 +7,10 @@
 # ============================================================================
 
 couchbase:
-  connectionString: "cb.xxxxx.cloud.couchbase.com"   # no couchbases:// prefix
-  username: "Administrator"
-  password: "changeme"
+  connectionString: "couchbases://cb.p8xr****.cloud.couchbase.com" # Capella Public Connection String
+  username: "changeme" # Capella Access Key
+  password: "changeme" # Capella Access Key Password
+  bucket: "prism" # this bucket should exist
 
 # Used for query embeddings - must be the SAME model the Couchbase AI Data
 # Plane Unstructured Data Workflow used to embed the ingested chunks, or
@@ -17,8 +18,9 @@ couchbase:
 aiDataPlane:
   modelEndpoint: "https://xxxxx.ai.cloud.couchbase.com"
   modelId: "your-model-id"
-  apiKey: "cbsk-..."   # the API Key TOKEN, not the API Key Id (a UUID) -
-                       # using the Id gives a 401 that reads like a bad endpoint
+  apiKey:
+    "cbsk-..." # the API Key TOKEN, not the API Key Id (a UUID) -
+    # using the Id gives a 401 that reads like a bad endpoint
 
 # Account-level only. Which folder within this bucket feeds which domain is
 # configured per-domain below, not here.
@@ -28,7 +30,7 @@ aws:
 
 openai:
   apiKey: "sk-..."
-  model: "gpt-5.4"   # optional, this is the default
+  model: "gpt-5.4" # optional, this is the default
 
 # ----------------------------------------------------------------------------
 # Domains - PRISM's own namespace contract. One Couchbase scope per domain,
@@ -41,10 +43,10 @@ openai:
 # Initialize creates for this domain - keep them distinct across domains, or
 # two domains sharing a name will silently clobber each other's index.
 # ----------------------------------------------------------------------------
-domains:
-  secfilings:
-    awsFolder: "Prism/3M"
-    docsIndex: "ftsSecfilingsDocs"
-    catalogIndex: "ftsSecfilingsCatalog"
+domains: # these are the different scopes under the bucket prism
+  secfilings: # FYI. Do not change
+    awsFolder: "your-s3-bucket-folder"
+    docsIndex: "ftsSecfilingsDocs" # FYI. Do not change
+    catalogIndex: "ftsSecfilingsCatalog" # FYI. Do not change.
 
 default: secfilings

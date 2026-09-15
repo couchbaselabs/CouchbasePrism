@@ -156,6 +156,13 @@ FTS_CATALOG_INDEX = fts_catalog_index()
 
 
 def couchbase_host() -> str:
+    """Strips a `couchbases://` prefix if present - this codebase talks to
+    Capella entirely over REST (couchbase_io.py builds its own https:// URLs
+    from this host), never the native SDK's Cluster.connect(), which is the
+    only thing that scheme is actually for. Accepting it anyway, rather than
+    requiring a bare host, means config.yaml's connectionString can be a
+    direct paste of Capella's own "Public Connection String" field, not a
+    hand-edited version of it."""
     return os.environ["COUCHBASE_CONN_STRING"].replace("couchbases://", "")
 
 

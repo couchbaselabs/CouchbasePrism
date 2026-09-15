@@ -101,9 +101,14 @@ range, if you'd rather scope it down).</p>
 <div class="panel">
 <strong>Copy (example):</strong>
 <ul>
-  <li><strong>Connection endpoint</strong>: <code>cb.p8x********.cloud.couchbase.com</code>
-      (no <code>couchbases://</code> prefix — <code>config.yaml</code>'s
-      <code>couchbase.connectionString</code> wants the bare host)</li>
+  <li><strong>Connection endpoint</strong>: Capella's own "Public Connection String" —
+      <code>couchbases://cb.p8x********.cloud.couchbase.com</code> — paste it into
+      <code>config.yaml</code>'s <code>couchbase.connectionString</code> exactly as
+      Capella gives it to you. The <code>couchbases://</code> prefix is optional
+      either way: this codebase talks to Capella over REST, not the native SDK, so
+      <code>config.couchbase_host()</code> strips the prefix if present before
+      building its own <code>https://</code> URLs — paste with or without it, both
+      work.</li>
   <li><strong>User access credentials</strong> (username/password)</li>
 </ul>
 </div>

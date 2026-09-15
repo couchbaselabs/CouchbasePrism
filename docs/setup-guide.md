@@ -23,9 +23,13 @@ collections (RBAC), and allow IP access from anywhere (or your own IP range,
 if you'd rather scope it down).
 
 Copy (example):
-- **Connection endpoint**: `cb.p8x********.cloud.couchbase.com` (no
-  `couchbases://` prefix - `config.yaml`'s `couchbase.connectionString` wants
-  the bare host)
+- **Connection endpoint**: Capella's own "Public Connection String" -
+  `couchbases://cb.p8x********.cloud.couchbase.com` - paste it into
+  `config.yaml`'s `couchbase.connectionString` exactly as Capella gives it
+  to you. The `couchbases://` prefix is optional either way: this codebase
+  talks to Capella over REST, not the native SDK, so `config.couchbase_host()`
+  strips the prefix if present before building its own `https://` URLs -
+  paste with or without it, both work.
 - **User access credentials** (username/password)
 
 ### 2. AWS S3
